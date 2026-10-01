@@ -44,6 +44,12 @@ func (c *conn) handlePlay() error {
 		return c.handlePlayerAction()
 	case v776.PacketPlayUseItemOn:
 		return c.handleUseItemOn()
+	case v776.PacketPlaySBChatCommand:
+		cmd, err := java.ReadChatCommand(c.rd)
+		if err != nil {
+			return err
+		}
+		return c.handleCommand(cmd)
 	case v776.PacketPlaySwing:
 		// Arm swing: no entity animation broadcast yet (M3+).
 		return nil
@@ -79,6 +85,7 @@ func (c *conn) startPlay() error {
 		radius:   radius,
 		seen:     make(map[[2]int32]bool),
 		onGround: true,
+		barUUID:  newBarUUID(),
 	}
 	c.player = p
 	c.s.addPlayer(p)

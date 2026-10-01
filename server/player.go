@@ -18,4 +18,9 @@ type player struct {
 
 	// mining is the current dig, guarded by Server.mu.
 	mining *miningState
+
+	// tpsbar marks the personal performance boss bar as visible; the
+	// ticker refreshes it once per second. barUUID is minted at spawn.
+	tpsbar  bool
+	barUUID [16]byte
 }

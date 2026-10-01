@@ -81,6 +81,13 @@ type Server struct {
 	// world is the M2 superflat overworld.
 	world *world
 
+	// stats is the rolling tick-timing recorder behind /tps and
+	// /tpsbar; written only from the ticker goroutine.
+	stats tickStats
+
+	// tickCount drives the 1 Hz tpsbar refresh cadence; ticker-only.
+	tickCount int64
+
 	// players are the joined, in-play players; guarded by mu together
 	// with player.seen and player.mining (the ticker touches both).
 	players map[*conn]*player
@@ -129,18 +136,32 @@ func (s *Server) startTicker() {
 	}()
 }
 
-// tickOnce advances per-tick state: mining progress today.
+// tickOnce advances per-tick state: mining progress today, plus the
+// tick-timing record and the 1 Hz tpsbar refresh. Runs on the ticker
+// goroutine only.
 func (s *Server) tickOnce() {
+	start := time.Now()
+
 	s.mu.Lock()
 	var digging []*player
+	var bars []*player
 	for _, p := range s.players {
 		if p.mining != nil {
 			digging = append(digging, p)
+		}
+		if p.tpsbar {
+			bars = append(bars, p)
 		}
 	}
 	s.mu.Unlock()
 	for _, p := range digging {
 		_ = s.advanceMining(p)
+	}
+
+	s.stats.record(time.Since(start), time.Now())
+	s.tickCount++
+	if s.tickCount%20 == 0 {
+		s.refreshTpsbars(bars)
 	}
 }
 

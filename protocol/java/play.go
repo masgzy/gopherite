@@ -474,3 +474,90 @@ func WriteForgetChunk(w *protocol.Writer, cx, cz int32) {
 func ReadPlayPong(r *protocol.Reader) (int32, error) {
 	return r.Int32()
 }
+
+// ---- commands, boss bar and system chat (/tpsbar, M3.5) ----
+
+// ReadChatCommand decodes the unsigned serverbound command packet. Since
+// 26.2 it carries only the command string (no leading slash); signatures
+// moved to the separate signed variant we do not accept yet.
+func ReadChatCommand(r *protocol.Reader) (string, error) {
+	return r.String(256)
+}
+
+// Boss bar operations (vanilla ClientboundBossEventPacket.OperationType
+// ordinal order).
+const (
+	BossOpAdd = iota
+	BossOpRemove
+	BossOpUpdateProgress
+	BossOpUpdateName
+	BossOpUpdateStyle
+	BossOpUpdateProperties
+)
+
+// Boss bar colors (BossEvent.BossBarColor ordinal order) and overlays.
+const (
+	BossColorPink = iota
+	BossColorBlue
+	BossColorRed
+	BossColorGreen
+	BossColorYellow
+	BossColorPurple
+	BossColorWhite
+)
+
+const (
+	BossOverlayProgress = iota
+	BossOverlayNotched6
+	BossOverlayNotched10
+	BossOverlayNotched12
+	BossOverlayNotched20
+)
+
+// writeBossHeader writes the shared UUID + operation prefix.
+func writeBossHeader(w *protocol.Writer, id [16]byte, op int32) {
+	w.UUID(id)
+	w.VarInt(op)
+}
+
+// WriteBossAdd encodes the ADD operation: title component, progress,
+// color, overlay and property flags (darken=1, music=2, fog=4).
+func WriteBossAdd(w *protocol.Writer, id [16]byte, title string, progress float32, color, overlay int32, flags byte) {
+	writeBossHeader(w, id, BossOpAdd)
+	WriteTextComponent(w, title)
+	w.Float(progress)
+	w.VarInt(color)
+	w.VarInt(overlay)
+	w.Byte(flags)
+}
+
+// WriteBossRemove encodes the REMOVE operation.
+func WriteBossRemove(w *protocol.Writer, id [16]byte) {
+	writeBossHeader(w, id, BossOpRemove)
+}
+
+// WriteBossProgress encodes the UPDATE_PROGRESS operation.
+func WriteBossProgress(w *protocol.Writer, id [16]byte, progress float32) {
+	writeBossHeader(w, id, BossOpUpdateProgress)
+	w.Float(progress)
+}
+
+// WriteBossTitle encodes the UPDATE_NAME operation.
+func WriteBossTitle(w *protocol.Writer, id [16]byte, title string) {
+	writeBossHeader(w, id, BossOpUpdateName)
+	WriteTextComponent(w, title)
+}
+
+// WriteBossStyle encodes the UPDATE_STYLE operation (color + overlay).
+func WriteBossStyle(w *protocol.Writer, id [16]byte, color, overlay int32) {
+	writeBossHeader(w, id, BossOpUpdateStyle)
+	w.VarInt(color)
+	w.VarInt(overlay)
+}
+
+// WriteSystemChat encodes the system chat packet: an NBT component plus
+// the overlay flag (false = normal chat position).
+func WriteSystemChat(w *protocol.Writer, text string) {
+	WriteTextComponent(w, text)
+	w.Bool(false)
+}

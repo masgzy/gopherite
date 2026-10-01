@@ -54,6 +54,7 @@ const (
 
 	// Play state.
 	PacketPlayAcceptTeleport     = 0x00
+	PacketPlaySBChatCommand      = 0x07
 	PacketPlaySBChunkBatchDone   = 0x0B
 	PacketPlayClientTickEnd      = 0x0D
 	PacketPlayConfigAcknowledged = 0x10
@@ -107,6 +108,7 @@ const (
 
 	// Play state.
 	PacketPlayBundle           = 0x00
+	PacketPlayBossEvent        = 0x09
 	PacketPlayBlockDestruction = 0x05
 	PacketPlayBlockChangedAck  = 0x04
 	PacketPlayBlockUpdate      = 0x08

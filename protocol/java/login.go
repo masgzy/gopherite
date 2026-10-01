@@ -119,9 +119,11 @@ func WriteLoginCompression(w *protocol.Writer, threshold int32) {
 	w.VarInt(threshold)
 }
 
-// WriteLoginDisconnect encodes the login-phase disconnect packet. reason
-// is a translation key; the wire format is an NBT text component
-// ({"translate": reason}).
+// WriteLoginDisconnect encodes the login-phase disconnect packet. Unlike
+// the configuration/play disconnects (NBT component via the common
+// ClientboundDisconnectPacket), the login-phase packet still carries a
+// VarInt-length string holding the compact JSON component — verified
+// against live vanilla 26.2 output (research/ours-dump/vanilla_login_disconnect.bin).
 func WriteLoginDisconnect(w *protocol.Writer, reason string) {
-	WriteTranslateComponent(w, reason)
+	WriteJsonComponent(w, "{\"translate\":\""+reason+"\"}")
 }
