@@ -95,11 +95,15 @@ func (c *conn) startPlay() error {
 	c.wr.Reset()
 	c.wr.VarInt(v776.PacketPlayLogin)
 	java.WritePlayLogin(c.wr, java.ClientboundLogin{
-		EntityID:         p.id,
-		Hardcore:         false,
-		Levels:           []string{"minecraft:overworld"},
-		MaxPlayers:       int32(c.s.opts.MaxPlayers),
-		ChunkRadius:      int32(c.s.opts.ViewDistance),
+		EntityID:   p.id,
+		Hardcore:   false,
+		Levels:     []string{"minecraft:overworld"},
+		MaxPlayers: int32(c.s.opts.MaxPlayers),
+		// Declare exactly the radius syncChunks will deliver: the client's
+		// loading screen waits for the declared square, so a larger number
+		// than the actual send leaves the player staring at the terrain
+		// screen until movement forces a re-sync.
+		ChunkRadius:      radius,
 		SimulationRadius: int32(c.s.opts.ViewDistance),
 		ReducedDebug:     false,
 		ShowDeathScreen:  true,
@@ -186,7 +190,7 @@ func (c *conn) startPlay() error {
 	}
 	c.wr.Reset()
 	c.wr.VarInt(v776.PacketPlayCacheRadius)
-	java.WritePlayCacheRadius(c.wr, int32(c.s.opts.ViewDistance))
+	java.WritePlayCacheRadius(c.wr, radius)
 	if err := c.sendPacket(c.wr.Bytes()); err != nil {
 		return err
 	}
