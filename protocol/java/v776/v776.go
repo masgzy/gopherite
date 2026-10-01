@@ -127,4 +127,5 @@ const (
 	PacketPlaySetTime          = 0x71
 	PacketPlaySystemChat       = 0x79
 	PacketPlayTabList          = 0x7A
+	PacketPlayUpdateTags       = 0x86
 )

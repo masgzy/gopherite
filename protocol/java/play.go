@@ -241,9 +241,10 @@ func ReadPlayKeepAlive(r *protocol.Reader) (int64, error) {
 	return r.Int64()
 }
 
-// WritePlayDisconnect encodes the play-phase disconnect packet.
+// WritePlayDisconnect encodes the play-phase disconnect packet. reason is
+// a translation key; the wire format is an NBT text component.
 func WritePlayDisconnect(w *protocol.Writer, reason string) {
-	w.String(reason)
+	WriteTranslateComponent(w, reason)
 }
 
 // ServerboundMovePlayer is the decoded player movement packet.

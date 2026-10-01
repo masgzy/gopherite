@@ -184,7 +184,7 @@ func (c *conn) finishLogin() error {
 func (c *conn) kickLogin(translationKey string) error {
 	c.wr.Reset()
 	c.wr.VarInt(v776.PacketLoginDisconnect)
-	java.WriteLoginDisconnect(c.wr, fmt.Sprintf(`{"translate":%q}`, translationKey))
+	java.WriteLoginDisconnect(c.wr, translationKey)
 	if err := c.sendPacket(c.wr.Bytes()); err != nil {
 		return err
 	}

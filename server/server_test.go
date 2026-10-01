@@ -381,8 +381,8 @@ func TestFullJoinFlow(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				present, _ := rr.Bool()
-				if present {
+				present, _ := rr.VarInt()
+				if present == 1 {
 					// Registry entries carry full network NBT: a rootless
 					// compound (1.20.2+ format, self-delimiting).
 					root, _ := rr.Byte()
@@ -393,6 +393,8 @@ func TestFullJoinFlow(t *testing.T) {
 				}
 			}
 			registryCount++
+		case v776.PacketCfgUpdateTags:
+			skipUpdateTagsPayload(t, rr)
 		case v776.PacketCfgFinish:
 			// Acknowledge the switch into play.
 			fw := protocol.NewWriter()
@@ -909,7 +911,7 @@ func TestEncryptedJoinFlow(t *testing.T) {
 			entries, _ := rr.VarInt()
 			for i := int32(0); i < entries; i++ {
 				id, _ := rr.String(256)
-				if present, _ := rr.Bool(); present {
+				if present, _ := rr.VarInt(); present == 1 {
 					root, _ := rr.Byte()
 					if root != 0x0A {
 						t.Fatalf("registry %s entry %s: NBT root 0x%x", key, id, root)
@@ -918,6 +920,8 @@ func TestEncryptedJoinFlow(t *testing.T) {
 				}
 			}
 			registries++
+		case v776.PacketCfgUpdateTags:
+			skipUpdateTagsPayload(t, rr)
 		case v776.PacketCfgFinish:
 			fw := protocol.NewWriter()
 			fw.VarInt(v776.PacketConfigFinish)
@@ -1167,6 +1171,33 @@ func TestOnlineModeHasJoined(t *testing.T) {
 
 // nbtWidth maps simple numeric NBT tags to their fixed payload width.
 var nbtWidth = map[byte]int{1: 1, 2: 2, 3: 4, 4: 8, 5: 4, 6: 8}
+
+// skipUpdateTagsPayload consumes one ClientboundUpdateTagsPacket body:
+// registry/tag groups referencing entries by protocol id.
+func skipUpdateTagsPayload(t *testing.T, rr *protocol.Reader) {
+	t.Helper()
+	registries, _ := rr.VarInt()
+	if registries <= 0 {
+		t.Fatalf("update tags: no registries")
+	}
+	for i := int32(0); i < registries; i++ {
+		if _, err := rr.String(256); err != nil {
+			t.Fatal(err)
+		}
+		tags, _ := rr.VarInt()
+		for j := int32(0); j < tags; j++ {
+			if _, err := rr.String(256); err != nil {
+				t.Fatal(err)
+			}
+			n, _ := rr.VarInt()
+			for k := int32(0); k < n; k++ {
+				if _, err := rr.VarInt(); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+	}
+}
 
 // skipNbtPayload advances rr past the payload of one NBT tag (the tag's
 // type byte has already been consumed), validating the structure. It

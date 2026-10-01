@@ -1,25 +1,12 @@
 #!/usr/bin/env python3
-"""Generate the network-NBT registry blob for Gopherite's configuration phase.
+"""DEPRECATED: no longer used by the server.
 
-Reads the vanilla 26.2 server jar's bundled datapack JSON, converts each
-synchronized-registry entry to network NBT (rootless compound, big endian),
-and packs everything into a single binary blob consumed by Go via go:embed.
-
-Blob layout (all integers big endian):
-  u8      registry count
-  per registry:
-    u8    key length, key bytes (utf-8, e.g. "minecraft:worldgen/biome")
-    u16   entry count
-    per entry:
-      u8    name length, name bytes (utf-8, without namespace)
-      u32   nbt length, nbt bytes (rootless compound NBT)
-
-Conversion mirrors vanilla's datapack-JSON -> Java value -> NbtOps path:
-  object  -> TAG_Compound        string -> TAG_String
-  array   -> TAG_List (element type unified; empty list writes type 0)
-  integer -> TAG_Int (TAG_Long when out of int32 range)
-  decimal -> TAG_Double          true/false -> TAG_Byte 1/0
-Codecs read values through NumericTag, so int-vs-double widening is safe.
+Hand-converting the bundled datapack JSON cannot reproduce the vanilla
+*network projection* of registry values (worldgen-only fields stripped,
+float precision, strict codecs), and vanilla clients reject such blobs
+during registry loading. The shipped frames in protocol/java/v776/ are
+now captured byte-exact from a pristine vanilla server via
+scripts/dumpbot; see v776/registry_data.go. Kept for reference.
 """
 
 import io

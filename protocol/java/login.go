@@ -119,8 +119,9 @@ func WriteLoginCompression(w *protocol.Writer, threshold int32) {
 	w.VarInt(threshold)
 }
 
-// WriteLoginDisconnect encodes the login-phase disconnect packet. Reason is
-// a JSON chat component document.
+// WriteLoginDisconnect encodes the login-phase disconnect packet. reason
+// is a translation key; the wire format is an NBT text component
+// ({"translate": reason}).
 func WriteLoginDisconnect(w *protocol.Writer, reason string) {
-	w.String(reason)
+	WriteTranslateComponent(w, reason)
 }

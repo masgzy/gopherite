@@ -1,7 +1,6 @@
 package server
 
 import (
-	"fmt"
 	"log"
 
 	"github.com/masgzy/gopherite/protocol"
@@ -109,33 +108,32 @@ func (c *conn) startConfiguration() error {
 }
 
 // handleKnownPacks finishes the negotiation and sends the registry data.
-// Gopherite always sends every entry with its full network NBT payload
-// (the vanilla server behaviour when the client's known-pack list does
-// not exactly match ours). Relying on empty payloads would only be valid
-// for a pristine vanilla client: modded clients answer with a superset
-// of packs, and the vanilla client then fails to rebuild entries from
-// its built-in data ("Failed to load registries").
+// Gopherite replays the byte-exact registry_data and update_tags frames
+// captured from a pristine vanilla 26.2 server (scripts/dumpbot). Reusing
+// the raw frames matters: the entries' NBT is the *network projection* of
+// the registry values (worldgen-only fields stripped, float precision
+// preserved), which no JSON-to-NBT conversion of the bundled datapack
+// reproduces faithfully — vanilla clients validate entries against strict
+// network codecs and reject anything else. Because the frames match
+// vanilla byte-for-byte, tag entry ids (which reference registries by
+// protocol index) are also valid.
 func (c *conn) handleKnownPacks() error {
 	if _, err := java.ReadConfigKnownPacks(c.rd); err != nil {
 		return err
 	}
 
-	packets, err := v776.RegistryDataPackets()
-	if err != nil {
-		return err
-	}
-	for _, p := range packets {
-		c.wr.Reset()
-		c.wr.VarInt(v776.PacketCfgRegistryData)
-		java.WriteConfigRegistryData(c.wr, p)
-		if err := c.sendPacket(c.wr.Bytes()); err != nil {
+	for _, frame := range v776.RegistryFrames() {
+		if err := c.sendPacket(frame); err != nil {
 			return err
 		}
 	}
-
-	// Vanilla also sends Update Tags here; the vanilla client tolerates the
-	// absence of tag data, which only degrades block/fluid tag behaviour.
-	// Tags are planned together with the tag-driven milestones.
+	// Update tags must follow the registry data (vanilla sends them inside
+	// the same synchronisation task). Without them the client cannot bind
+	// tag references such as #minecraft:enchantable/weapon inside synced
+	// entries and registry loading fails.
+	if err := c.sendPacket(v776.UpdateTagsFrame()); err != nil {
+		return err
+	}
 
 	// Finish configuration: the client must now answer with the
 	// configuration finish acknowledgement.
@@ -148,6 +146,6 @@ func (c *conn) handleKnownPacks() error {
 func (c *conn) kickConfig(reason string) error {
 	c.wr.Reset()
 	c.wr.VarInt(v776.PacketCfgDisconnect)
-	c.wr.String(fmt.Sprintf(`{"text":%q}`, reason))
+	java.WriteTextComponent(c.wr, reason)
 	return c.sendPacket(c.wr.Bytes())
 }
