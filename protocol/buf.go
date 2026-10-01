@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+	"math"
 	"unicode/utf8"
 )
 
@@ -68,6 +69,53 @@ func (r *Reader) VarLong() (int64, error) {
 	return 0, ErrVarLongTooBig
 }
 
+// Int32 decodes a big-endian signed int.
+func (r *Reader) Int32() (int32, error) {
+	b, err := r.take(4)
+	if err != nil {
+		return 0, err
+	}
+	return int32(binary.BigEndian.Uint32(b)), nil
+}
+
+// Float decodes a big-endian float32.
+func (r *Reader) Float() (float32, error) {
+	b, err := r.take(4)
+	if err != nil {
+		return 0, err
+	}
+	return math.Float32frombits(binary.BigEndian.Uint32(b)), nil
+}
+
+// Double decodes a big-endian float64.
+func (r *Reader) Double() (float64, error) {
+	b, err := r.take(8)
+	if err != nil {
+		return 0, err
+	}
+	return math.Float64frombits(binary.BigEndian.Uint64(b)), nil
+}
+
+// Byte decodes a single unsigned byte.
+func (r *Reader) Byte() (byte, error) {
+	b, err := r.take(1)
+	if err != nil {
+		return 0, err
+	}
+	return b[0], nil
+}
+
+// UUID decodes a UUID stored as four big-endian int32 words.
+func (r *Reader) UUID() ([16]byte, error) {
+	var out [16]byte
+	b, err := r.take(16)
+	if err != nil {
+		return out, err
+	}
+	copy(out[:], b)
+	return out, nil
+}
+
 // Uint16 decodes a big-endian unsigned short.
 func (r *Reader) Uint16() (uint16, error) {
 	b, err := r.take(2)
@@ -123,6 +171,9 @@ func (r *Reader) String(maxChars int) (string, error) {
 	return string(b), nil // copy: packet buffers are pooled and reused
 }
 
+// FixedBytes decodes exactly n raw bytes.
+func (r *Reader) FixedBytes(n int) ([]byte, error) { return r.take(n) }
+
 // Raw returns the entire remaining payload as a transient view.
 func (r *Reader) Raw() []byte {
 	out := r.data[r.pos:]
@@ -153,6 +204,42 @@ func (w *Writer) VarInt(v int32) *Writer { w.buf = AppendVarInt(w.buf, v); retur
 
 // VarLong encodes a VarLong.
 func (w *Writer) VarLong(v int64) *Writer { w.buf = AppendVarLong(w.buf, v); return w }
+
+// Int32 encodes a big-endian signed int.
+func (w *Writer) Int32(v int32) *Writer {
+	w.buf = binary.BigEndian.AppendUint32(w.buf, uint32(v))
+	return w
+}
+
+// Float encodes a big-endian float32.
+func (w *Writer) Float(v float32) *Writer {
+	w.buf = binary.BigEndian.AppendUint32(w.buf, math.Float32bits(v))
+	return w
+}
+
+// Double encodes a big-endian float64.
+func (w *Writer) Double(v float64) *Writer {
+	w.buf = binary.BigEndian.AppendUint64(w.buf, math.Float64bits(v))
+	return w
+}
+
+// Byte appends a single raw byte.
+func (w *Writer) Byte(v byte) *Writer { w.buf = append(w.buf, v); return w }
+
+// FixedBytes appends raw bytes without a length prefix.
+func (w *Writer) FixedBytes(b []byte) *Writer { w.buf = append(w.buf, b...); return w }
+
+// UUID encodes a UUID as sixteen raw bytes.
+func (w *Writer) UUID(id [16]byte) *Writer { w.buf = append(w.buf, id[:]...); return w }
+
+// OptionalString encodes a string with a presence flag, matching the
+// vanilla "optional" wrapper (bool + value).
+func (w *Writer) OptionalString(s string, present bool) *Writer {
+	if !present {
+		return w.Bool(false)
+	}
+	return w.Bool(true).String(s)
+}
 
 // Uint16 encodes a big-endian unsigned short.
 func (w *Writer) Uint16(v uint16) *Writer {
@@ -188,3 +275,18 @@ func (w *Writer) Raw(b []byte) *Writer { w.buf = append(w.buf, b...); return w }
 
 // ErrStringTooLong is returned when a decoded string exceeds its bound.
 var ErrStringTooLong = errors.New("protocol: string exceeds maximum length")
+
+// Int16 encodes a big-endian signed short.
+func (w *Writer) Int16(v int16) *Writer {
+	w.buf = binary.BigEndian.AppendUint16(w.buf, uint16(v))
+	return w
+}
+
+// Int16 decodes a big-endian signed short.
+func (r *Reader) Int16() (int16, error) {
+	b, err := r.take(2)
+	if err != nil {
+		return 0, err
+	}
+	return int16(binary.BigEndian.Uint16(b)), nil
+}

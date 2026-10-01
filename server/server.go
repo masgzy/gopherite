@@ -5,11 +5,11 @@ package server
 
 import (
 	"context"
-	"crypto/rand"
 	"fmt"
 	"net"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/masgzy/gopherite/protocol"
 )
@@ -30,6 +30,12 @@ type Options struct {
 	// final behaviour ahead of the milestone that implements it.
 	OnlineMode bool
 
+	// SkipSessionAuth performs the full encryption handshake but skips the
+	// Mojang hasJoined call, deriving the offline UUID instead. It exists
+	// so integration tests can exercise the encrypted path without real
+	// accounts; production configs never set it.
+	SkipSessionAuth bool
+
 	// VersionName and ProtocolNumber are advertised in the status ping.
 	VersionName    string
 	ProtocolNumber int32
@@ -44,6 +50,18 @@ type Options struct {
 	// ReadTimeoutSeconds bounds how long a connection may stay silent in
 	// the handshake and status states.
 	ReadTimeoutSeconds int
+
+	// ViewDistance is the server-side chunk radius sent to clients.
+	ViewDistance int
+
+	// KeepAliveInterval overrides the 15s keep-alive period (tests).
+	// Zero means the vanilla default.
+	KeepAliveInterval time.Duration
+
+	// SessionServerURL overrides the Mojang session server base used for
+	// online-mode hasJoined verification. Empty means the production
+	// endpoint; tests point this at a stub.
+	SessionServerURL string
 }
 
 // Server accepts connections and drives the per-connection state machine.
@@ -55,6 +73,13 @@ type Server struct {
 	wg      sync.WaitGroup
 	closing atomic.Bool
 	favicon string // data URI, computed once at start
+
+	// keys is the login RSA keypair, generated lazily on first online-mode
+	// login and reused for the server lifetime.
+	keys *protocol.KeyPair
+
+	// world is the M2 superflat overworld.
+	world *world
 }
 
 // New validates options and returns a ready-to-start Server.
@@ -68,7 +93,10 @@ func New(opts Options) (*Server, error) {
 	if opts.ReadTimeoutSeconds <= 0 {
 		opts.ReadTimeoutSeconds = 30
 	}
-	s := &Server{opts: opts}
+	if opts.ViewDistance <= 0 {
+		opts.ViewDistance = 8
+	}
+	s := &Server{opts: opts, world: newWorld(0)}
 	if f, err := loadFaviconDataURI(opts.FaviconPath); err != nil {
 		return nil, err
 	} else if f != "" {
@@ -148,11 +176,3 @@ func (s *Server) Shutdown(ctx context.Context) error {
 
 // Options exposes the effective options (used by handlers and tests).
 func (s *Server) Options() Options { return s.opts }
-
-// newRequestID returns a cryptographically random identifier, used for
-// per-connection salt material in later milestones.
-func newRequestID() [16]byte {
-	var b [16]byte
-	_, _ = rand.Read(b[:])
-	return b
-}

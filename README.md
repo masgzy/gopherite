@@ -23,13 +23,15 @@ Gopherite 是一个**从零开始、以 Go 语言实现**的 Minecraft Java Edit
 
 ## ✨ 特性
 
-### 已实现（M0 / M1）
+### 已实现（M0 / M1 / M2）
 
 - **单二进制，资源全内嵌**：默认配置、EULA 模板等通过 `go:embed` 编译进二进制，启动时零解压；运行时只产出必须持久化的文件（`eula.txt`、`server.properties`、后续的 `world/`）
 - **Vanilla 兼容的 EULA 门禁**：首次启动生成 `eula.txt` 并拒绝启动，直至确认接受 Minecraft EULA；支持 `--accept-eula` 直通，文件格式与原版一致，现有面板/脚本无缝兼容
 - **协议 776 网络层**：VarInt / VarLong / 分帧 / 包缓冲区，全链路零拷贝、热路径零分配设计
 - **服务器列表 Ping 完整可用**：握手（Intent=Status）→ 状态响应（版本 / 协议号 / MOTD / 人数上限 / 图标）→ Ping/Pong，原版客户端服务器列表中可见并显示延迟
-- **优雅登录拒绝**：登录意图会收到正式的 Login Disconnect 聊天组件提示（M2 起替换为真实登录流程）
+- **完整登录流程（离线 + 正版双模）**：`online-mode=true` 时执行 RSA-1024 密钥交换、AES/CFB8 加密与 Mojang 会话服务器校验；`false` 时按原版规则派生离线 UUID——两条路径均经协议级端到端测试验证
+- **Zlib 压缩层**：与原版一致的压缩/加密分层（压缩在加密之内、外层长度明文），阈值可配
+- **超平坦世界 + 进入世界行走**：配置阶段注册表同步（29 项动态注册表）→ 进入 play → 超平坦区块下发（高度图 / 区块节 / 天空光照）→ 传送确认、移动包处理与 keep-alive 心跳
 - **多版本协议层预留**：包常量按版本子包组织（`protocol/java/v776`），为后续版本协商与多版本支持留出结构位
 
 ### 规划中
@@ -83,8 +85,8 @@ go build -trimpath -ldflags "-s -w" -o gopherite ./cmd/gopherite
 | `server-ip` | （空） | 绑定地址，空为全部接口 |
 | `motd` | `A Gopherite Server` | 服务器列表公告 |
 | `max-players` | `20` | 人数上限 |
-| `online-mode` | `true` | 正版验证开关（M2 生效，现已持久化） |
-| `network-compression-threshold` | `256` | 压缩阈值（M2 生效） |
+| `online-mode` | `true` | 正版验证开关（M2 已生效） |
+| `network-compression-threshold` | `256` | 压缩阈值（M2 已生效） |
 | `server-icon` | （空） | 64×64 PNG 图标路径 |
 | `read-timeout` | `30` | 握手/状态阶段读超时（秒） |
 
@@ -111,8 +113,8 @@ gopherite/
 ## 🚀 Roadmap
 
 - [x] **M0** 工程骨架、社区文件、CI
-- [x] **M1** 网络层 + 服务器列表 Ping（当前）
-- [ ] **M2** 登录流程（离线 + 正版双模、加密、压缩）+ 超平坦区块 + 进入世界行走
+- [x] **M1** 网络层 + 服务器列表 Ping
+- [x] **M2** 登录流程（离线 + 正版双模、加密、压缩）+ 超平坦区块 + 进入世界行走（当前）
 - [ ] **M3** 方块破坏/放置、区块管理与简化光照
 - [ ] **M4** 完整 NBT + Anvil 存档读写（世界持久化）
 - [ ] **M5** 实体系统（物理、基础 AI）

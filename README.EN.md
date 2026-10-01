@@ -23,13 +23,16 @@ Gopherite is a ground-up implementation of a Minecraft Java Edition vanilla serv
 
 ## ✨ Features
 
-### Implemented (M0 / M1)
+### Implemented (M0 / M1 / M2)
 
 - **Single binary, fully embedded resources** — default config and EULA template are compiled in via `go:embed`; startup performs zero extraction, and the server only writes files that must be persisted (`eula.txt`, `server.properties`, and `world/` in a later milestone)
 - **Vanilla-compatible EULA gate** — first launch generates `eula.txt` and refuses to start until the Minecraft EULA is accepted; `--accept-eula` short-circuits it. The file format matches vanilla, so existing panels and scripts keep working
 - **Protocol 776 network layer** — VarInt / VarLong / packet framing / buffers with zero-copy reads and zero-allocation hot paths
 - **Complete server list ping** — handshake (Intent=Status) → status response (version / protocol / MOTD / player cap / icon) → ping/pong; Gopherite shows up in the vanilla client's server list with live latency
 - **Graceful login rejection** — login intents receive a proper Login Disconnect chat component (replaced by the real login flow in M2)
+- **Full login flow (online + offline modes)** — with `online-mode=true` the server performs the RSA-1024 key exchange, AES/CFB8 encryption and Mojang session-server validation; with `false` the offline UUID is derived by the vanilla rules. Both paths are covered by protocol-level end-to-end tests
+- **Zlib compression layer** — vanilla-exact layering (compression inside encryption, plaintext outer length), threshold configurable
+- **Superflat world + spawn & movement** — configuration-phase registry sync (29 dynamic registries) → play phase → superflat chunk streaming (heightmaps / sections / skylight) → teleport confirm, movement handling and keep-alive
 - **Multi-version seam** — packet constants live in per-version sub-packages (`protocol/java/v776`), ready for version negotiation later
 
 ### Planned
@@ -83,8 +86,8 @@ Vanilla-style `server.properties` (`key=value`, `#` comments). Unknown keys are 
 | `server-ip` | (empty) | bind address; empty = all interfaces |
 | `motd` | `A Gopherite Server` | server list message |
 | `max-players` | `20` | advertised player cap |
-| `online-mode` | `true` | Mojang account validation (effective in M2; persisted now) |
-| `network-compression-threshold` | `256` | packet compression threshold (effective in M2) |
+| `online-mode` | `true` | Mojang account validation (effective since M2) |
+| `network-compression-threshold` | `256` | packet compression threshold (effective since M2) |
 | `server-icon` | (empty) | 64×64 PNG icon path |
 | `read-timeout` | `30` | handshake/status read timeout (seconds) |
 
@@ -111,8 +114,8 @@ gopherite/
 ## 🚀 Roadmap
 
 - [x] **M0** project skeleton, community files, CI
-- [x] **M1** network layer + server list ping (current)
-- [ ] **M2** login flow (offline + online modes, encryption, compression) + superflat chunks + walking in a world
+- [x] **M1** network layer + server list ping
+- [x] **M2** login flow (offline + online modes, encryption, compression) + superflat chunks + walking in a world (current)
 - [ ] **M3** block breaking/placing, chunk management, simplified lighting
 - [ ] **M4** full NBT + Anvil world persistence
 - [ ] **M5** entities (physics, basic AI)

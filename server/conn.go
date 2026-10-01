@@ -2,9 +2,13 @@ package server
 
 import (
 	"bufio"
+	"crypto/aes"
+	"crypto/rand"
 	"errors"
 	"fmt"
+	"log"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/masgzy/gopherite/protocol"
@@ -19,6 +23,8 @@ const (
 	stateHandshake connState = iota
 	stateStatus
 	stateLogin
+	stateConfig
+	statePlay
 )
 
 // conn wraps one TCP connection and runs its packet loop.
@@ -31,12 +37,32 @@ type conn struct {
 	rd *protocol.Reader
 	wr *protocol.Writer
 	st connState
+
+	// writeMu serializes all writes to bw: the dispatch goroutine and the
+	// keep-alive ticker both emit packets on this connection.
+	writeMu sync.Mutex
+
+	// cipher state; nil until negotiated
+	decrypt *protocol.CFB8
+	encrypt *protocol.CFB8
+
+	// compression; nil until the Set Compression packet
+	compression *protocol.CompressionLayer
+
+	// login/session data
+	username   string
+	profileID  [16]byte
+	sessionID  [16]byte
+	challenge  []byte
+	properties []java.ProfileProperty
+
+	// play state
+	player *player
 }
 
 func (s *Server) handleConn(nc net.Conn) {
 	defer nc.Close()
 	idle := time.Duration(s.opts.ReadTimeoutSeconds) * time.Second
-	_ = nc.SetDeadline(time.Now().Add(idle))
 
 	c := &conn{
 		s:  s,
@@ -45,20 +71,95 @@ func (s *Server) handleConn(nc net.Conn) {
 		bw: bufio.NewWriterSize(nc, 4096),
 		st: stateHandshake,
 	}
+	defer func() {
+		if c.username != "" {
+			log.Printf("%s disconnected", c.username)
+		}
+	}()
 	c.fr = protocol.NewFrameReader(c.br, s.opts.MaxPacketLen)
 	c.rd = &protocol.Reader{}
 	c.wr = protocol.NewWriter()
 
 	for {
+		// Idle timeout: the deadline applies from now until the next frame
+		// arrives. Active connections (keep-alives, movement) never trip it;
+		// silent ones are dropped like vanilla's readTimeout.
+		_ = nc.SetReadDeadline(time.Now().Add(idle))
 		payload, err := c.fr.Next()
 		if err != nil {
 			return // EOF, reset or malformed frame: drop silently like vanilla
+		}
+		if c.decrypt != nil {
+			plain := make([]byte, 0, len(payload)+16)
+			plain = c.decrypt.Crypt(plain, payload)
+			payload = plain
+		}
+		if c.compression != nil {
+			payload, err = c.compression.DecompressFrame(payload, s.opts.MaxPacketLen)
+			if err != nil {
+				return
+			}
 		}
 		c.rd.Reset(payload)
 		if err := c.dispatch(); err != nil {
 			return
 		}
 	}
+}
+
+// sendPacket encodes body (already including the packet id) and writes it
+// with the current cipher/compression settings. The layering mirrors
+// vanilla Netty: compress first, then encrypt, then the plaintext length
+// VarInt around the encrypted frame.
+func (c *conn) sendPacket(body []byte) error {
+	payload := body
+	if c.compression != nil {
+		payload = c.compression.CompressInner(body)
+	}
+	if c.encrypt != nil {
+		buf := make([]byte, 0, len(payload)+16)
+		payload = c.encrypt.Crypt(buf, payload)
+	}
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	return protocol.WriteFramed(c.bw, payload)
+}
+
+// writeWith wraps c.wr in an encoder func and flushes it as one packet.
+func (c *conn) writeWith(id int32, encode func(w *protocol.Writer)) error {
+	c.wr.Reset()
+	c.wr.VarInt(id)
+	encode(c.wr)
+	return c.sendPacket(c.wr.Bytes())
+}
+
+// startEncryption enables CFB8 for both directions with the shared secret.
+func (c *conn) startEncryption(secret []byte) error {
+	iv := secret[:aes.BlockSize] // vanilla uses the secret itself as IV
+	dec, err := protocol.NewCFB8Decrypter(secret, iv)
+	if err != nil {
+		return err
+	}
+	enc, err := protocol.NewCFB8Encrypter(secret, iv)
+	if err != nil {
+		return err
+	}
+	c.decrypt, c.encrypt = dec, enc
+	return nil
+}
+
+// enableCompression installs the zlib framing layer.
+func (c *conn) enableCompression(threshold int32) {
+	c.compression = protocol.NewCompressionLayer(threshold)
+}
+
+// randomBytes fills a buffer with cryptographically random bytes.
+func randomBytes(n int) ([]byte, error) {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		return nil, err
+	}
+	return b, nil
 }
 
 // dispatch routes the current packet by connection state.
@@ -70,6 +171,10 @@ func (c *conn) dispatch() error {
 		return c.handleStatus()
 	case stateLogin:
 		return c.handleLogin()
+	case stateConfig:
+		return c.handleConfig()
+	case statePlay:
+		return c.handlePlay()
 	}
 	return fmt.Errorf("unknown state %d", c.st)
 }
@@ -126,24 +231,6 @@ func (c *conn) handleStatus() error {
 
 // errCloseAfterPong terminates the loop cleanly after answering a ping.
 var errCloseAfterPong = errors.New("status: closed after pong")
-
-// handleLogin rejects joins for now with the same disconnect packet the
-// final implementation will use; M2 replaces the body with the real flow.
-func (c *conn) handleLogin() error {
-	id, err := c.rd.VarInt()
-	if err != nil {
-		return err
-	}
-	if id != v776.PacketLoginStart {
-		return fmt.Errorf("unexpected packet 0x%x in login state", id)
-	}
-	// LoginStart carries the username; we intentionally do not consume it
-	// further: the connection is rejected regardless.
-	const msg = `{"text":"Gopherite: joining is not implemented yet (planned for M2).","color":"yellow"}`
-	c.wr.Reset()
-	c.wr.VarInt(v776.PacketLoginDisconnect).String(msg)
-	return protocol.WriteFramed(c.bw, c.wr.Bytes())
-}
 
 // sendStatusResponse renders and writes the server list JSON document.
 func (c *conn) sendStatusResponse() error {
