@@ -1,0 +1,34 @@
+# Build artifacts
+dist/
+gopherite
+gopherite.exe
+
+# Runtime outputs (single binary writes only what must be persisted)
+world/
+world_nether/
+world_the_end/
+logs/
+*.log
+server.properties
+eula.txt
+usercache.json
+ops.json
+whitelist.json
+banned-players.json
+banned-ips.json
+
+# Go
+*.test
+*.out
+coverage.txt
+vendor/
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db

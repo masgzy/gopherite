@@ -1,0 +1,36 @@
+name: 功能请求 (Feature Request)
+description: 提议新功能或里程碑内的新能力
+labels: ["enhancement"]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: 涉及领域
+      options:
+        - 协议 / 网络
+        - 世界 / 区块
+        - 实体 / 玩家
+        - 性能优化
+        - 工具链 / CI / 文档
+        - 其他
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: 要解决的问题
+      placeholder: 目前无法做到……（描述场景，而非直接给方案）
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 期望的方案
+      placeholder: 建议……
+    validations:
+      required: true
+  - type: textarea
+    id: vanilla
+    attributes:
+      label: 原版行为参照（如适用）
+      placeholder: 反编译类名 / minecraft.wiki 链接 / 抓包证据

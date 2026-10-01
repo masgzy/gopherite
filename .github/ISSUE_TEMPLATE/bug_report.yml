@@ -1,0 +1,57 @@
+name: Bug 报告 (Bug Report)
+description: 报告 Gopherite 的错误行为
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢报告 Bug！请尽量填写完整，便于复现与定位。
+        ⚠️ 安全漏洞请勿在此公开，请走 Security Advisories 私密报告（见 SECURITY.md）。
+  - type: dropdown
+    id: area
+    attributes:
+      label: 出问题的模块
+      options:
+        - 网络层 / 协议（protocol）
+        - 服务器列表 Ping / 状态（server）
+        - 登录 / EULA（eula, login）
+        - 配置（config）
+        - 构建 / CI
+        - 其他
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. 启动 `./gopherite --port 25565`
+        2. 用 26.2 客户端添加服务器 ...
+        3. 观察到 ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望行为 vs 实际行为
+      placeholder: 期望显示 MOTD；实际服务器列表显示"无法连接"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Gopherite 版本 / 提交
+      placeholder: 0.1.0-alpha.1 / commit abcd123
+    validations:
+      required: true
+  - type: input
+    id: client
+    attributes:
+      label: 客户端版本
+      placeholder: 26.2（原版 / 第三方启动器）
+  - type: textarea
+    id: logs
+    attributes:
+      label: 相关日志
+      placeholder: 粘贴服务端/客户端日志片段
+      render: shell
