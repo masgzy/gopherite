@@ -50,6 +50,8 @@ func (c *conn) handlePlay() error {
 			return err
 		}
 		return c.handleCommand(cmd)
+	case v776.PacketPlaySBCarriedItem:
+		return c.handleSetCarriedItem()
 	case v776.PacketPlaySwing:
 		// Arm swing: no entity animation broadcast yet (M3+).
 		return nil
@@ -143,6 +145,9 @@ func (c *conn) startPlay() error {
 	if err := c.sendPacket(c.wr.Bytes()); err != nil {
 		return err
 	}
+
+	// Starter hotbar (per-slot inventory sync).
+	c.sendStarterInventory()
 
 	// Tab list initialisation with this player only.
 	c.wr.Reset()

@@ -23,4 +23,8 @@ type player struct {
 	// ticker refreshes it once per second. barUUID is minted at spawn.
 	tpsbar  bool
 	barUUID [16]byte
+
+	// heldSlot is the client's hotbar selection (0-8), guarded by
+	// Server.mu like the rest of the player model.
+	heldSlot int32
 }

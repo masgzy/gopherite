@@ -105,15 +105,16 @@ func (c *conn) handlePlayerAction() error {
 	return nil
 }
 
-// handleUseItemOn acknowledges the sequence. Placing requires the item
-// model (inventory milestone); the empty hand is a no-op besides the ack
-// so client predictions settle.
+// handleUseItemOn acknowledges the sequence and places the held block
+// item against the clicked face. The starter hotbar is infinite (no
+// decrement yet); client predictions settle via the ack + block update.
 func (c *conn) handleUseItemOn() error {
 	u, err := java.ReadUseItemOn(c.rd)
 	if err != nil {
 		return err
 	}
 	c.ackSequence(u.Sequence)
+	c.placeBlock(u)
 	return nil
 }
 

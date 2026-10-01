@@ -228,3 +228,109 @@ func TestTickStatsSanity(t *testing.T) {
 		t.Fatalf("laggy server tps1m %f, want <=10", l1)
 	}
 }
+
+// TestBlockPlacement uses the starter hotbar: slot 0 (stone) against the
+// grass surface top face → a stone block appears at (0,-60,0).
+func TestBlockPlacement(t *testing.T) {
+	s := startTestServer(t)
+	b := joinBotToPlay(t, s, "Builder")
+
+	w := protocol.NewWriter()
+	w.VarInt(v776.PacketPlayUseItemOn)
+	w.VarInt(0) // main hand
+	java.WriteBlockPos(w, 0, -61, 0)
+	w.VarInt(1) // face: up
+	w.Float(0.5).Float(1).Float(0.5)
+	w.Bool(false) // not inside block
+	w.Bool(false) // no world border hit
+	w.VarInt(21)  // sequence
+	b.write(w.Bytes())
+
+	b.nc.SetReadDeadline(time.Now().Add(5 * time.Second))
+	acked := false
+	for {
+		id, rr := b.next()
+		switch id {
+		case v776.PacketPlayBlockChangedAck:
+			got, _ := rr.VarInt()
+			if got != 21 {
+				t.Fatalf("ack %d, want 21", got)
+			}
+			acked = true
+		case v776.PacketPlayBlockUpdate:
+			x, y, z, _ := java.ReadBlockPos(rr)
+			state, _ := rr.VarInt()
+			if !acked {
+				t.Fatal("block update before ack")
+			}
+			if x != 0 || y != -60 || z != 0 {
+				t.Fatalf("placed at (%d,%d,%d)", x, y, z)
+			}
+			if want := defaultStateOf("minecraft:stone"); int(state) != want {
+				t.Fatalf("state %d, want stone %d", state, want)
+			}
+			return
+		case v776.PacketPlayCBKeepAlive:
+			continue
+		}
+	}
+}
+
+// TestPlacementOccupied verifies no overwrite: pre-fill the target cell,
+// click up onto the block below, and expect the ack but no Block Update
+// and an unchanged world.
+func TestPlacementOccupied(t *testing.T) {
+	s := startTestServer(t)
+	b := joinBotToPlay(t, s, "Packer")
+
+	cobble := int32(defaultStateOf("minecraft:cobblestone"))
+	if got := s.world.getBlock(0, -60, 0); got != stateAir {
+		t.Fatalf("pre: (0,-60,0) = %d", got)
+	}
+	s.world.setBlock(0, -60, 0, cobble)
+
+	w := protocol.NewWriter()
+	w.VarInt(v776.PacketPlayUseItemOn)
+	w.VarInt(0)
+	java.WriteBlockPos(w, 0, -61, 0)
+	w.VarInt(1)
+	w.Float(0.5).Float(1).Float(0.5)
+	w.Bool(false)
+	w.Bool(false)
+	w.VarInt(5)
+	b.write(w.Bytes())
+
+	// Expect the ack, then prove no Block Update follows within a short
+	// window and the world still holds the pre-filled cobblestone.
+	b.nc.SetReadDeadline(time.Now().Add(2 * time.Second))
+	for {
+		id, rr := b.next()
+		if id == v776.PacketPlayBlockChangedAck {
+			if _, err := rr.VarInt(); err != nil {
+				t.Fatal(err)
+			}
+			break
+		}
+	}
+	// Drain any trailing packets for a moment; a Block Update here is a
+	// regression (placement must not overwrite occupied cells).
+	b.nc.SetReadDeadline(time.Now().Add(700 * time.Millisecond))
+	for {
+		payload, err := b.fr.Next()
+		if err != nil {
+			break // timeout: no packet arrived, good
+		}
+		dec, err := b.comp.DecompressFrame(payload, protocol.DefaultMaxPacketLen)
+		if err != nil {
+			break
+		}
+		r := protocol.NewReader(dec)
+		id, _ := r.VarInt()
+		if id == v776.PacketPlayBlockUpdate {
+			t.Fatal("placement must not overwrite an occupied cell")
+		}
+	}
+	if got := s.world.getBlock(0, -60, 0); got != cobble {
+		t.Fatalf("target changed to %d", got)
+	}
+}

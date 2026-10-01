@@ -121,6 +121,7 @@ configDone:
 			v776.PacketPlayPlayerPosition, v776.PacketPlayCacheCenter,
 			v776.PacketPlayCacheRadius, v776.PacketPlaySpawnPosition,
 			v776.PacketPlaySetTime, v776.PacketPlayGameEvent,
+			v776.PacketPlaySetPlayerInv,
 			v776.PacketPlayLevelChunk, v776.PacketPlayChunkBatchStart:
 			continue
 		default:

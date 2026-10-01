@@ -547,6 +547,15 @@ configDone:
 				_, _ = rr.Float()
 				_, _ = rr.Float()
 			}
+		case v776.PacketPlaySetPlayerInv:
+			// Starter hotbar per-slot sync: skip.
+			_, _ = rr.VarInt()
+			cnt, _ := rr.VarInt()
+			if cnt > 0 {
+				_, _ = rr.VarInt()
+				_, _ = rr.VarInt()
+				_, _ = rr.VarInt()
+			}
 		case v776.PacketPlayGameEvent:
 			ev, _ := rr.Byte()
 			_, _ = rr.Float()

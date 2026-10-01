@@ -66,6 +66,7 @@ const (
 	PacketPlayMoveStatus         = 0x21
 	PacketPlayPlayerLoaded       = 0x2C
 	PacketPlaySBPong             = 0x2D
+	PacketPlaySBCarriedItem      = 0x35
 	PacketPlaySwing              = 0x3F
 	PacketPlayUseItemOn          = 0x42
 )
@@ -132,6 +133,7 @@ const (
 	PacketPlayCacheRadius      = 0x5F
 	PacketPlaySpawnPosition    = 0x61
 	PacketPlayHeldSlot         = 0x69
+	PacketPlaySetPlayerInv     = 0x6C
 	PacketPlaySetTime          = 0x71
 	PacketPlaySystemChat       = 0x79
 	PacketPlayTabList          = 0x7A

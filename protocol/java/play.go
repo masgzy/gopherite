@@ -561,3 +561,23 @@ func WriteSystemChat(w *protocol.Writer, text string) {
 	WriteTextComponent(w, text)
 	w.Bool(false)
 }
+
+// WriteSetPlayerInventory encodes the 26.2 per-slot inventory sync: slot
+// VarInt then an optional ItemStack (count VarInt; when > 0: baked item
+// holder id+1, empty component patch = two zero VarInts).
+func WriteSetPlayerInventory(w *protocol.Writer, slot int32, itemID int32, count int32) {
+	w.VarInt(slot)
+	if count <= 0 {
+		w.VarInt(0)
+		return
+	}
+	w.VarInt(count)
+	w.VarInt(itemID + 1) // baked holder reference: registry index + 1
+	w.VarInt(0)          // component patch: no additions
+	w.VarInt(0)          // ... and no removals
+}
+
+// ReadSetCarriedItem decodes the hotbar selection packet.
+func ReadSetCarriedItem(r *protocol.Reader) (int32, error) {
+	return r.VarInt()
+}
