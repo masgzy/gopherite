@@ -1,9 +1,11 @@
 package server
 
 import (
+	"fmt"
 	"log"
 	"time"
 
+	"github.com/masgzy/gopherite/internal/ui"
 	"github.com/masgzy/gopherite/protocol"
 	"github.com/masgzy/gopherite/protocol/java"
 	"github.com/masgzy/gopherite/protocol/java/v776"
@@ -53,7 +55,7 @@ func (c *conn) handlePlay() error {
 // startPlay performs the initial spawn packet sequence, mirroring
 // PlayerList.placeNewPlayer for the M2 packet subset.
 func (c *conn) startPlay() error {
-	log.Printf("%s entered play", c.username)
+	log.Printf(ui.Success("OK ")+"%s 进入游戏", c.username)
 	p := &player{
 		conn:  c,
 		name:  c.username,
@@ -202,7 +204,7 @@ func (c *conn) sendSpawnChunks() error {
 	p := c.player
 	radius := int32(c.s.opts.ViewDistance)
 	cx, cz := chunkCoord(p.x), chunkCoord(p.z)
-	log.Printf("preparing spawn area for %s (radius %d)", c.username, radius)
+	log.Printf("正在为 %s 准备出生区域（半径 %s）", c.username, ui.Number(fmt.Sprint(radius)))
 
 	c.wr.Reset()
 	c.wr.VarInt(v776.PacketPlayChunkBatchStart)

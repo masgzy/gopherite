@@ -101,7 +101,10 @@ func WriteConfigRegistryData(w *protocol.Writer, p ClientboundRegistryData) {
 	for _, e := range p.Entries {
 		w.String(e.ID)
 		if e.HasData {
-			w.Bool(true).VarInt(int32(len(e.Payload))).FixedBytes(e.Payload)
+			// Optional NBT: presence byte followed by the raw network NBT
+			// (rootless compound, 1.20.2+ format). NBT is self-delimiting;
+			// there is no length prefix on the wire.
+			w.Bool(true).FixedBytes(e.Payload)
 		} else {
 			w.Bool(false)
 		}

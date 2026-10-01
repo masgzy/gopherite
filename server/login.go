@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/masgzy/gopherite/internal/ui"
 	"github.com/masgzy/gopherite/protocol"
 	"github.com/masgzy/gopherite/protocol/java"
 	"github.com/masgzy/gopherite/protocol/java/v776"
@@ -66,7 +67,7 @@ func (c *conn) handleLoginHello() error {
 
 	if !c.s.opts.OnlineMode {
 		c.profileID = protocol.OfflinePlayerUUID(c.username)
-		log.Printf("%s logged in with entity id <pending> (offline mode)", c.username)
+		log.Printf("%s 正在登录（离线模式，实体 ID 待分配）", c.username)
 		return c.finishLogin()
 	}
 	// Online mode: send the encryption request; the next packet must be Key.
@@ -132,22 +133,22 @@ func (c *conn) handleLoginKey() error {
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Get(url)
 	if err != nil {
-		log.Printf("login: session servers unreachable: %v", err)
+		log.Printf(ui.Error("X 登录")+": 会话服务器不可达: %v", err)
 		return c.kickLogin("multiplayer.disconnect.authservers_down")
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		log.Printf("login: username %s failed session verification", c.username)
+		log.Printf(ui.Error("X 登录")+": 玩家 %s 正版验证未通过", c.username)
 		return c.kickLogin("multiplayer.disconnect.unverified_username")
 	}
 	id, props, err := java.ParseHasJoined(resp.Body)
 	if err != nil {
-		log.Printf("login: bad hasJoined response: %v", err)
+		log.Printf(ui.Error("X 登录")+": 会话服务器响应异常: %v", err)
 		return c.kickLogin("multiplayer.disconnect.unverified_username")
 	}
 	c.profileID = id
 	c.properties = props
-	log.Printf("UUID of player %s is %s", c.username, java.FormatUUID(id))
+	log.Printf("玩家 %s 的 UUID 为 %s", c.username, ui.Number(java.FormatUUID(id)))
 	return c.finishLogin()
 }
 

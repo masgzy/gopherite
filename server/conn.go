@@ -73,7 +73,7 @@ func (s *Server) handleConn(nc net.Conn) {
 	}
 	defer func() {
 		if c.username != "" {
-			log.Printf("%s disconnected", c.username)
+			log.Printf("%s 断开连接", c.username)
 		}
 	}()
 	c.fr = protocol.NewFrameReader(c.br, s.opts.MaxPacketLen)

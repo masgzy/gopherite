@@ -377,14 +377,19 @@ func TestFullJoinFlow(t *testing.T) {
 			}
 			entries, _ := rr.VarInt()
 			for i := int32(0); i < entries; i++ {
-				if _, err := rr.String(256); err != nil {
+				id, err := rr.String(256)
+				if err != nil {
 					t.Fatal(err)
 				}
 				present, _ := rr.Bool()
 				if present {
-					if _, err := rr.Bytes(); err != nil {
-						t.Fatal(err)
+					// Registry entries carry full network NBT: a rootless
+					// compound (1.20.2+ format, self-delimiting).
+					root, _ := rr.Byte()
+					if root != 0x0A {
+						t.Fatalf("registry %s entry %s: NBT root 0x%x", key, id, root)
 					}
+					skipNbtPayload(t, rr, 0x0A)
 				}
 			}
 			registryCount++
@@ -903,11 +908,13 @@ func TestEncryptedJoinFlow(t *testing.T) {
 			}
 			entries, _ := rr.VarInt()
 			for i := int32(0); i < entries; i++ {
-				_, _ = rr.String(256)
+				id, _ := rr.String(256)
 				if present, _ := rr.Bool(); present {
-					if _, err := rr.Bytes(); err != nil {
-						t.Fatal(err)
+					root, _ := rr.Byte()
+					if root != 0x0A {
+						t.Fatalf("registry %s entry %s: NBT root 0x%x", key, id, root)
 					}
+					skipNbtPayload(t, rr, 0x0A)
 				}
 			}
 			registries++
@@ -1155,5 +1162,74 @@ func TestOnlineModeHasJoined(t *testing.T) {
 	}
 	if gotUsername != player {
 		t.Fatalf("stub username: %q", gotUsername)
+	}
+}
+
+// nbtWidth maps simple numeric NBT tags to their fixed payload width.
+var nbtWidth = map[byte]int{1: 1, 2: 2, 3: 4, 4: 8, 5: 4, 6: 8}
+
+// skipNbtPayload advances rr past the payload of one NBT tag (the tag's
+// type byte has already been consumed), validating the structure. It
+// mirrors the standard big-endian NBT layout used by the 1.20.2+ network
+// format; on any malformed input the test fails.
+func skipNbtPayload(t *testing.T, rr *protocol.Reader, tag byte) {
+	t.Helper()
+	switch tag {
+	case 1, 2, 3, 4, 5, 6:
+		if _, err := rr.FixedBytes(nbtWidth[tag]); err != nil {
+			t.Fatal(err)
+		}
+	case 7, 11, 12: // byte/int/long array
+		n, err := rr.Int32()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n < 0 {
+			t.Fatalf("negative array length %d", n)
+		}
+		w := map[byte]int{7: 1, 11: 4, 12: 8}[tag]
+		if _, err := rr.FixedBytes(int(n) * w); err != nil {
+			t.Fatal(err)
+		}
+	case 8: // string: unsigned short length + UTF-8
+		n, err := rr.Uint16()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := rr.FixedBytes(int(n)); err != nil {
+			t.Fatal(err)
+		}
+	case 9: // list: element type + count + payloads
+		et, err := rr.Byte()
+		if err != nil {
+			t.Fatal(err)
+		}
+		n, err := rr.Int32()
+		if err != nil || n < 0 {
+			t.Fatalf("list length %d", n)
+		}
+		for i := int32(0); i < n; i++ {
+			skipNbtPayload(t, rr, et)
+		}
+	case 10: // compound: named fields until TAG_End
+		for {
+			ft, err := rr.Byte()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if ft == 0 {
+				return
+			}
+			n, err := rr.Uint16()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := rr.FixedBytes(int(n)); err != nil {
+				t.Fatal(err)
+			}
+			skipNbtPayload(t, rr, ft)
+		}
+	default:
+		t.Fatalf("bad NBT tag 0x%x", tag)
 	}
 }

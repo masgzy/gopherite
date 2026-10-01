@@ -74,7 +74,7 @@ func (c *conn) readChannelPayload() error {
 // ServerConfigurationPacketListenerImpl.startConfiguration: brand, feature
 // flags, then the registry synchronisation task.
 func (c *conn) startConfiguration() error {
-	log.Printf("%s entered configuration", c.username)
+	log.Printf("%s 进入配置阶段", c.username)
 
 	// Brand payload on the minecraft:brand channel.
 	c.wr.Reset()
@@ -109,33 +109,25 @@ func (c *conn) startConfiguration() error {
 }
 
 // handleKnownPacks finishes the negotiation and sends the registry data.
-// Vanilla clients answer with the core pack, letting the server send every
-// entry with an empty payload: the client rebuilds contents from its
-// built-in data using the entry order we transmit.
+// Gopherite always sends every entry with its full network NBT payload
+// (the vanilla server behaviour when the client's known-pack list does
+// not exactly match ours). Relying on empty payloads would only be valid
+// for a pristine vanilla client: modded clients answer with a superset
+// of packs, and the vanilla client then fails to rebuild entries from
+// its built-in data ("Failed to load registries").
 func (c *conn) handleKnownPacks() error {
-	packs, err := java.ReadConfigKnownPacks(c.rd)
+	if _, err := java.ReadConfigKnownPacks(c.rd); err != nil {
+		return err
+	}
+
+	packets, err := v776.RegistryDataPackets()
 	if err != nil {
 		return err
 	}
-	knownCore := false
-	for _, p := range packs {
-		if p.Namespace == v776.NamespaceVanilla && p.ID == v776.PackCoreID {
-			knownCore = true
-		}
-	}
-	if !knownCore {
-		// Full NBT registry sync is planned for a later milestone; only
-		// vanilla clients are supported in this one.
-		return c.kickConfig("Gopherite M2 requires a vanilla client (core pack negotiation failed).")
-	}
-
-	for _, reg := range v776.SyncRegistries {
+	for _, p := range packets {
 		c.wr.Reset()
 		c.wr.VarInt(v776.PacketCfgRegistryData)
-		java.WriteConfigRegistryData(c.wr, java.ClientboundRegistryData{
-			RegistryKey: reg.Key,
-			Entries:     java.EmptyRegistryEntries(reg.Entries),
-		})
+		java.WriteConfigRegistryData(c.wr, p)
 		if err := c.sendPacket(c.wr.Bytes()); err != nil {
 			return err
 		}
@@ -143,7 +135,7 @@ func (c *conn) handleKnownPacks() error {
 
 	// Vanilla also sends Update Tags here; the vanilla client tolerates the
 	// absence of tag data, which only degrades block/fluid tag behaviour.
-	// Tags are planned together with full registry NBT sync.
+	// Tags are planned together with the tag-driven milestones.
 
 	// Finish configuration: the client must now answer with the
 	// configuration finish acknowledgement.
