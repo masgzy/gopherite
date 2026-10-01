@@ -41,8 +41,9 @@ func barBlocks(filled int) string {
 	return strings.Repeat("█", filled) + strings.Repeat("░", tpsbarWidth-filled)
 }
 
-// tpsbarTitle builds the two-line bar title with legacy § spans, which
-// the vanilla renderer honours inside text components.
+// tpsbarTitle builds the single-line bar title with legacy § spans. The
+// vanilla boss bar font has no glyph for \n, so a two-line title shows a
+// missing-glyph box mid-screen — everything lives on one line instead.
 func tpsbarTitle(tps, mspt float64, rt runtimeSnapshot) string {
 	_, code := tpsColor(tps)
 	filled := int(tps/20*tpsbarWidth + 0.5)
@@ -55,11 +56,9 @@ func tpsbarTitle(tps, mspt float64, rt runtimeSnapshot) string {
 		msptCode = "§e"
 	}
 
-	line1 := fmt.Sprintf("%sTPS §f%.1f %s%s §7| §bMSPT %s%.1fms",
-		code, tps, code, barBlocks(filled), msptCode, mspt)
-	line2 := fmt.Sprintf("§d协程 §f%d §7| §dGC §f%d §7| §d内存 §f%.1fMB",
+	return fmt.Sprintf("%sTPS §f%.1f %s%s §7| §bMSPT %s%.1fms §7| §d协程 §f%d §7| §dGC §f%d §7| §d内存 §f%.1fMB",
+		code, tps, code, barBlocks(filled), msptCode, mspt,
 		rt.Goroutines, rt.NumGC, rt.HeapMB)
-	return line1 + "\n" + line2
 }
 
 // newBarUUID mints the per-player boss bar identifier.
