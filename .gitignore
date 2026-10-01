@@ -1,7 +1,7 @@
 # Build artifacts
 dist/
-gopherite
-gopherite.exe
+/gopherite
+/gopherite.exe
 
 # Runtime outputs (single binary writes only what must be persisted)
 world/
@@ -9,8 +9,8 @@ world_nether/
 world_the_end/
 logs/
 *.log
-server.properties
-eula.txt
+/server.properties
+/eula.txt
 usercache.json
 ops.json
 whitelist.json
