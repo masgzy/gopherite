@@ -335,6 +335,141 @@ func ReadPlayConfigAcknowledged(r *protocol.Reader) error {
 	return nil
 }
 
+// ---- block interaction (M3) ----
+
+// PlayerAction identifies the serverbound player action packet variants.
+type PlayerAction int32
+
+// Vanilla player action statuses.
+const (
+	ActionStartDestroy PlayerAction = iota
+	ActionAbortDestroy
+	ActionStopDestroy
+	ActionDropAllItem
+	ActionDropItem
+	ActionReleaseUseItem
+	ActionSwapItemWithOffhand
+)
+
+// ServerboundPlayerAction decodes the dig/cancel/finish action packet:
+// status, BlockPos, face, sequence.
+type ServerboundPlayerAction struct {
+	Action   PlayerAction
+	X, Y, Z  int32
+	Face     int32
+	Sequence int32
+}
+
+// ReadPlayerAction decodes the player action packet.
+func ReadPlayerAction(r *protocol.Reader) (ServerboundPlayerAction, error) {
+	var a ServerboundPlayerAction
+	action, err := r.VarInt()
+	if err != nil {
+		return a, err
+	}
+	a.Action = PlayerAction(action)
+	if a.X, a.Y, a.Z, err = ReadBlockPos(r); err != nil {
+		return a, err
+	}
+	if a.Face, err = r.VarInt(); err != nil {
+		return a, err
+	}
+	a.Sequence, err = r.VarInt()
+	return a, err
+}
+
+// ServerboundUseItemOn decodes the right-click-block packet: hand,
+// BlockPos, face, cursor offsets, inside-block flag, world-border flag,
+// sequence.
+type ServerboundUseItemOn struct {
+	Hand           int32
+	X, Y, Z        int32
+	Face           int32
+	CursorX        float32
+	CursorY        float32
+	CursorZ        float32
+	InsideBlock    bool
+	WorldBorderHit bool
+	Sequence       int32
+}
+
+// ReadUseItemOn decodes the use-item-on packet.
+func ReadUseItemOn(r *protocol.Reader) (ServerboundUseItemOn, error) {
+	var u ServerboundUseItemOn
+	var err error
+	if u.Hand, err = r.VarInt(); err != nil {
+		return u, err
+	}
+	if u.X, u.Y, u.Z, err = ReadBlockPos(r); err != nil {
+		return u, err
+	}
+	if u.Face, err = r.VarInt(); err != nil {
+		return u, err
+	}
+	if u.CursorX, err = r.Float(); err != nil {
+		return u, err
+	}
+	if u.CursorY, err = r.Float(); err != nil {
+		return u, err
+	}
+	if u.CursorZ, err = r.Float(); err != nil {
+		return u, err
+	}
+	if u.InsideBlock, err = r.Bool(); err != nil {
+		return u, err
+	}
+	if u.WorldBorderHit, err = r.Bool(); err != nil {
+		return u, err
+	}
+	u.Sequence, err = r.VarInt()
+	return u, err
+}
+
+// ReadBlockPos decodes the packed long position: x (26 bits) | z (26
+// bits) | y (12 bits, low).
+func ReadBlockPos(r *protocol.Reader) (int32, int32, int32, error) {
+	v, err := r.Int64()
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	x := int32(v >> 38)
+	y := int32(v << 52 >> 52) // 12-bit signed
+	z := int32(v << 12 >> 38)
+	return x, y, z, nil
+}
+
+// WriteBlockPos packs a position the same way.
+func WriteBlockPos(w *protocol.Writer, x, y, z int32) {
+	w.Int64(int64(uint64(x&0x3FFFFFF)<<38 | uint64(z&0x3FFFFFF)<<12 | uint64(y&0xFFF)))
+}
+
+// WriteBlockUpdate encodes the single block change packet.
+func WriteBlockUpdate(w *protocol.Writer, x, y, z int32, stateID int32) {
+	WriteBlockPos(w, x, y, z)
+	w.VarInt(stateID)
+}
+
+// WriteBlockDestruction encodes the mining progress packet; stage ranges
+// 0-9 and -1 clears the overlay.
+func WriteBlockDestruction(w *protocol.Writer, entityID int32, x, y, z int32, stage int8) {
+	w.VarInt(entityID)
+	WriteBlockPos(w, x, y, z)
+	w.Byte(byte(stage))
+}
+
+// WriteBlockChangedAck encodes the sequence acknowledgement the client
+// needs to settle its local block predictions.
+func WriteBlockChangedAck(w *protocol.Writer, sequence int32) {
+	w.VarInt(sequence)
+}
+
+// WriteForgetChunk encodes the unload-chunk packet (note the wire order:
+// Z first, then X).
+func WriteForgetChunk(w *protocol.Writer, cx, cz int32) {
+	w.Int32(cz)
+	w.Int32(cx)
+}
+
 // ReadPlayPong decodes the play-phase ping pong answer.
 func ReadPlayPong(r *protocol.Reader) (int32, error) {
 	return r.Int32()

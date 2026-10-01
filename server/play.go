@@ -40,6 +40,13 @@ func (c *conn) handlePlay() error {
 		// ignores the pacing hint and streams at full speed.
 		_, err := java.ReadPlayChunkBatchDone(c.rd)
 		return err
+	case v776.PacketPlayPlayerAction:
+		return c.handlePlayerAction()
+	case v776.PacketPlayUseItemOn:
+		return c.handleUseItemOn()
+	case v776.PacketPlaySwing:
+		// Arm swing: no entity animation broadcast yet (M3+).
+		return nil
 	case v776.PacketPlayClientTickEnd:
 		return java.ReadPlayClientTickEnd(c.rd)
 	case v776.PacketPlaySBPong:
@@ -53,20 +60,28 @@ func (c *conn) handlePlay() error {
 }
 
 // startPlay performs the initial spawn packet sequence, mirroring
-// PlayerList.placeNewPlayer for the M2 packet subset.
+// PlayerList.placeNewPlayer for the M3 packet subset.
 func (c *conn) startPlay() error {
 	log.Printf(ui.Success("OK ")+"%s 进入游戏", c.username)
+	radius := int32(c.s.opts.ViewDistance)
+	if c.clientViewDistance > 0 && int32(c.clientViewDistance) < radius {
+		radius = int32(c.clientViewDistance)
+	}
 	p := &player{
-		conn:  c,
-		name:  c.username,
-		id:    1, // single-player milestone: entity id 1
-		x:     0.5,
-		y:     -60,
-		z:     0.5,
-		yaw:   0,
-		pitch: 0,
+		conn:     c,
+		name:     c.username,
+		id:       1, // single-player milestone: entity id 1
+		x:        0.5,
+		y:        -60,
+		z:        0.5,
+		yaw:      0,
+		pitch:    0,
+		radius:   radius,
+		seen:     make(map[[2]int32]bool),
+		onGround: true,
 	}
 	c.player = p
+	c.s.addPlayer(p)
 
 	c.wr.Reset()
 	c.wr.VarInt(v776.PacketPlayLogin)
@@ -201,42 +216,13 @@ func (c *conn) startPlay() error {
 // sendSpawnChunks streams the initial chunk batch once the client reports
 // itself loaded.
 func (c *conn) sendSpawnChunks() error {
-	p := c.player
-	radius := int32(c.s.opts.ViewDistance)
-	cx, cz := chunkCoord(p.x), chunkCoord(p.z)
-	log.Printf("正在为 %s 准备出生区域（半径 %s）", c.username, ui.Number(fmt.Sprint(radius)))
-
-	c.wr.Reset()
-	c.wr.VarInt(v776.PacketPlayChunkBatchStart)
-	if err := c.sendPacket(c.wr.Bytes()); err != nil {
-		return err
-	}
-
-	count := 0
-	for dx := -radius; dx <= radius; dx++ {
-		for dz := -radius; dz <= radius; dz++ {
-			data, err := c.s.world.chunkData(cx+dx, cz+dz)
-			if err != nil {
-				return err
-			}
-			c.wr.Reset()
-			c.wr.VarInt(v776.PacketPlayLevelChunk)
-			c.wr.FixedBytes(data)
-			if err := c.sendPacket(c.wr.Bytes()); err != nil {
-				return err
-			}
-			count++
-		}
-	}
-
-	c.wr.Reset()
-	c.wr.VarInt(v776.PacketPlayCBChunkBatchDone)
-	c.wr.VarInt(int32(count))
-	return c.sendPacket(c.wr.Bytes())
+	log.Printf("正在为 %s 准备出生区域（半径 %s）", c.username, ui.Number(fmt.Sprint(c.player.radius)))
+	return c.syncChunks()
 }
 
-// handleMove applies a movement packet to the player model. M2 trusts the
-// client fully (no anti-cheat); chunk borders trigger new chunk streaming.
+// handleMove applies a movement packet to the player model. M3 trusts the
+// client fully (no anti-cheat); crossing chunk borders triggers the
+// incremental chunk sync (new sends + unload notifications).
 func (c *conn) handleMove(packetID int32) error {
 	move, err := java.ReadPlayMove(c.rd, packetID)
 	if err != nil {
@@ -246,42 +232,29 @@ func (c *conn) handleMove(packetID int32) error {
 	if p == nil {
 		return nil
 	}
+	moved := false
 	if move.HasPos {
 		p.x, p.y, p.z = move.X, move.Y, move.Z
 		if ncx := chunkCoord(p.x); ncx != p.cx {
-			if p.chunksSent {
-				// stream the entered chunk column lazily in M2
-				if err := c.sendChunkColumn(ncx, p.cz); err != nil {
-					return err
-				}
-			}
 			p.cx = ncx
+			moved = true
 		}
 		if ncz := chunkCoord(p.z); ncz != p.cz {
-			if p.chunksSent {
-				if err := c.sendChunkColumn(p.cx, ncz); err != nil {
-					return err
-				}
-			}
 			p.cz = ncz
+			moved = true
 		}
 	}
+	// Every move variant (including status-only) carries the ground flag;
+	// mining speed depends on it.
+	p.onGround = move.OnGround
 	if move.HasRot {
 		p.yaw, p.pitch = move.Yaw, move.Pitch
 	}
-	return nil
-}
-
-// sendChunkColumn streams the chunk column for a chunk the player entered.
-func (c *conn) sendChunkColumn(cx, cz int32) error {
-	data, err := c.s.world.chunkData(cx, cz)
-	if err != nil {
-		return err
+	if moved && p.chunksSent {
+		// Only re-sync when the chunk actually changed.
+		return c.syncChunks()
 	}
-	c.wr.Reset()
-	c.wr.VarInt(v776.PacketPlayLevelChunk)
-	c.wr.FixedBytes(data)
-	return c.sendPacket(c.wr.Bytes())
+	return nil
 }
 
 // keepAliveLoop sends a keep-alive every 15 seconds (vanilla

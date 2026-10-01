@@ -18,31 +18,6 @@ func readSimpleBitStorage(longs []uint64, index, bits int) uint64 {
 	return v & (1<<bits - 1)
 }
 
-func TestPackUniformMatchesSimpleBitStorage(t *testing.T) {
-	// 9 bits, 256 entries -> ceil(256/7) = 37 longs, exactly the vanilla
-	// heightmap geometry.
-	longs := make([]uint64, 37)
-	packUniform(longs, 256, 9, 4)
-	for i := 0; i < 256; i++ {
-		if got := readSimpleBitStorage(longs, i, 9); got != 4 {
-			t.Fatalf("entry %d = %d, want 4", i, got)
-		}
-	}
-	// Entry 7 and 8 sit across the long0/long1 boundary; a naive aligned
-	// packer returns 8/0 here. Reassert explicitly.
-	if e7 := readSimpleBitStorage(longs, 7, 9); e7 != 4 {
-		t.Fatalf("straddled entry 7 = %d, want 4", e7)
-	}
-	// 4-bit block storage: 4096 entries, 256 longs, no straddling.
-	bl := make([]uint64, 256)
-	packUniform(bl, 4096, 4, 0xA)
-	for i := 0; i < 4096; i++ {
-		if got := readSimpleBitStorage(bl, i, 4); got != 0xA {
-			t.Fatalf("block entry %d = %d, want 10", i, got)
-		}
-	}
-}
-
 // decodeChunkPayload parses the cached Level Chunk with Light payload the
 // server produces and asserts the invariants a vanilla client relies on.
 func TestChunkDataInvariants(t *testing.T) {
@@ -234,5 +209,69 @@ func TestChunkCacheReuse(t *testing.T) {
 	c, _ := w.chunkData(2, 1)
 	if &a[0] == &c[0] {
 		t.Fatalf("distinct chunks share a cache entry")
+	}
+}
+
+// TestHeightmapReflectsEdits proves the heightmap is derived from live
+// block data: breaking the grass surface lowers the column height.
+func TestHeightmapReflectsEdits(t *testing.T) {
+	w := newWorld(0)
+	c := w.chunkAt(0, 0)
+	if got := c.heightAt(0, 0); got != 4 {
+		t.Fatalf("superflat height %d, want 4", got)
+	}
+	if !w.setBlock(0, -61, 0, stateAir) {
+		t.Fatal("breaking the surface must change the chunk")
+	}
+	if got := c.heightAt(0, 0); got != 3 {
+		t.Fatalf("height after breaking %d, want 3", got)
+	}
+	// And the serialised payload must agree with the model.
+	payload := c.payload()
+	r := protocol.NewReader(payload)
+	r.Int32()
+	r.Int32()
+	n, _ := r.VarInt()
+	for i := int32(0); i < n; i++ {
+		r.VarInt()
+		lc, _ := r.VarInt()
+		longs := make([]uint64, lc)
+		for j := range longs {
+			v, _ := r.Int64()
+			longs[j] = uint64(v)
+		}
+		if got := readSimpleBitStorage(longs, 0, 9); got != 3 {
+			t.Fatalf("heightmap entry 0 = %d, want 3", got)
+		}
+	}
+}
+
+// TestBlockstatesTableSpot checks the generated state table against the
+// known vanilla constants used elsewhere in the server.
+func TestBlockstatesTableSpot(t *testing.T) {
+	if got := blockNameOf(stateAir); got != "minecraft:air" {
+		t.Fatalf("air: %q", got)
+	}
+	if got := blockNameOf(stateStone); got != "minecraft:stone" {
+		t.Fatalf("stone: %q", got)
+	}
+	if got := blockNameOf(stateGrassBlock); got != "minecraft:grass_block" {
+		t.Fatalf("grass: %q", got)
+	}
+	if got := defaultStateOf("minecraft:dirt"); got != stateDirt {
+		t.Fatalf("dirt default %d, want %d", got, stateDirt)
+	}
+	if got := defaultStateOf("minecraft:grass_block"); got != stateGrassBlock {
+		t.Fatalf("grass default %d, want %d", got, stateGrassBlock)
+	}
+	if got := defaultStateOf("minecraft:nonexistent_block"); got != -1 {
+		t.Fatalf("unknown block default %d", got)
+	}
+	if len(stateBlock) < 32366 {
+		t.Fatalf("state space %d too small", len(stateBlock))
+	}
+	props := blockPropsOf(defaultStateOf("minecraft:oak_stairs"))
+	if props == nil || props["facing"] != "north" || props["shape"] != "straight" {
+		t.Fatalf("oak_stairs default props: %v", props)
 	}
 }

@@ -80,6 +80,68 @@ type Server struct {
 
 	// world is the M2 superflat overworld.
 	world *world
+
+	// players are the joined, in-play players; guarded by mu together
+	// with player.seen and player.mining (the ticker touches both).
+	players map[*conn]*player
+}
+
+// playerListLocked returns the joined players; caller holds mu.
+func (s *Server) playerListLocked() []*player {
+	out := make([]*player, 0, len(s.players))
+	for _, p := range s.players {
+		out = append(out, p)
+	}
+	return out
+}
+
+// addPlayer registers a joined player for ticking and broadcasts.
+func (s *Server) addPlayer(p *player) {
+	s.mu.Lock()
+	s.players[p.conn] = p
+	s.mu.Unlock()
+}
+
+// removePlayer unregisters a disconnecting player.
+func (s *Server) removePlayer(c *conn) {
+	s.mu.Lock()
+	delete(s.players, c)
+	s.mu.Unlock()
+}
+
+// startTicker runs the 20 TPS server tick loop until shutdown. M3 uses
+// it for mining progress; later milestones extend it to world ticks.
+func (s *Server) startTicker() {
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		t := time.NewTicker(50 * time.Millisecond)
+		defer t.Stop()
+		for {
+			select {
+			case <-t.C:
+				if s.closing.Load() {
+					return
+				}
+				s.tickOnce()
+			}
+		}
+	}()
+}
+
+// tickOnce advances per-tick state: mining progress today.
+func (s *Server) tickOnce() {
+	s.mu.Lock()
+	var digging []*player
+	for _, p := range s.players {
+		if p.mining != nil {
+			digging = append(digging, p)
+		}
+	}
+	s.mu.Unlock()
+	for _, p := range digging {
+		_ = s.advanceMining(p)
+	}
 }
 
 // New validates options and returns a ready-to-start Server.
@@ -96,7 +158,7 @@ func New(opts Options) (*Server, error) {
 	if opts.ViewDistance <= 0 {
 		opts.ViewDistance = 8
 	}
-	s := &Server{opts: opts, world: newWorld(0)}
+	s := &Server{opts: opts, world: newWorld(0), players: make(map[*conn]*player)}
 	if f, err := loadFaviconDataURI(opts.FaviconPath); err != nil {
 		return nil, err
 	} else if f != "" {
@@ -130,6 +192,7 @@ func (s *Server) Serve() error {
 	if s.ln == nil {
 		return fmt.Errorf("server: Serve called before Listen")
 	}
+	s.startTicker()
 	for {
 		c, err := s.ln.Accept()
 		if err != nil {

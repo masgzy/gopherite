@@ -58,12 +58,15 @@ const (
 	PacketPlayClientTickEnd      = 0x0D
 	PacketPlayConfigAcknowledged = 0x10
 	PacketPlaySBKeepAlive        = 0x1C
+	PacketPlayPlayerAction       = 0x29
 	PacketPlayMovePos            = 0x1E
 	PacketPlayMovePosRot         = 0x1F
 	PacketPlayMoveRot            = 0x20
 	PacketPlayMoveStatus         = 0x21
 	PacketPlayPlayerLoaded       = 0x2C
 	PacketPlaySBPong             = 0x2D
+	PacketPlaySwing              = 0x3F
+	PacketPlayUseItemOn          = 0x42
 )
 
 // Clientbound packet identifiers, per connection state.
@@ -104,6 +107,9 @@ const (
 
 	// Play state.
 	PacketPlayBundle           = 0x00
+	PacketPlayBlockDestruction = 0x05
+	PacketPlayBlockChangedAck  = 0x04
+	PacketPlayBlockUpdate      = 0x08
 	PacketPlayCBChunkBatchDone = 0x0B
 	PacketPlayChunkBatchStart  = 0x0C
 	PacketPlayDisconnect       = 0x20

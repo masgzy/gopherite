@@ -49,14 +49,16 @@ func (c *conn) handleConfig() error {
 // readClientInformation consumes the client info packet fields.
 func (c *conn) readClientInformation() {
 	_, _ = c.rd.String(16) // language
-	_, _ = c.rd.Byte()     // view distance
-	_, _ = c.rd.VarInt()   // chat visibility
-	_, _ = c.rd.Bool()     // chat colors
-	_, _ = c.rd.Byte()     // model customisation
-	_, _ = c.rd.VarInt()   // main hand
-	_, _ = c.rd.Bool()     // text filtering
-	_, _ = c.rd.Bool()     // allows listing
-	_, _ = c.rd.VarInt()   // particle status
+	if vd, err := c.rd.Byte(); err == nil {
+		c.clientViewDistance = int(vd)
+	}
+	_, _ = c.rd.VarInt() // chat visibility
+	_, _ = c.rd.Bool()   // chat colors
+	_, _ = c.rd.Byte()   // model customisation
+	_, _ = c.rd.VarInt() // main hand
+	_, _ = c.rd.Bool()   // text filtering
+	_, _ = c.rd.Bool()   // allows listing
+	_, _ = c.rd.VarInt() // particle status
 }
 
 // readChannelPayload consumes an unexpected-but-harmless channel payload.

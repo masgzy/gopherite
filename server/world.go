@@ -1,24 +1,22 @@
 package server
 
 import (
-	"bytes"
-	"compress/zlib"
-	"sort"
 	"sync"
 
 	"github.com/masgzy/gopherite/protocol"
 )
 
-// world models the M2 superflat overworld: an infinite plane of
-// bedrock + 2 dirt + grass at the bottom of the vanilla world height.
+// world holds the M3 mutable chunk map. The initial terrain is the M2
+// superflat plane (bedrock + 2 dirt + grass at world bottom); blocks can
+// change at runtime through setBlock.
 type world struct {
 	seed   int64
 	mu     sync.Mutex
-	caches map[[2]int32][]byte // compressed chunk payloads keyed by chunk pos
+	chunks map[[2]int32]*chunk
 }
 
 func newWorld(seed int64) *world {
-	return &world{seed: seed, caches: make(map[[2]int32][]byte)}
+	return &world{seed: seed, chunks: make(map[[2]int32]*chunk)}
 }
 
 // clockID returns the baked registry index of a world clock (overworld=0,
@@ -41,9 +39,11 @@ const (
 
 // superflat block state ids for 26.2, from the official blocks report.
 const (
-	stateAir        = 0
-	stateStone      = 1
-	stateGrassBlock = 8
+	stateAir   = 0
+	stateStone = 1
+	// grass_block default (snowy=false). State 8 is the SNOWY variant; the
+	// M2 constant pointed at it, which real clients render as snow-covered.
+	stateGrassBlock = 9
 	stateDirt       = 10
 	stateBedrock    = 85
 )
@@ -51,168 +51,40 @@ const (
 // biome index for minecraft:plains inside the vanilla sorted biome list.
 const biomePlains = 40
 
-// blockAt returns the state id of the superflat floor at a y level, or
-// air above the surface.
-func blockAt(y int) int32 {
-	switch y {
-	case -64:
-		return stateBedrock
-	case -63, -62:
-		return stateDirt
-	case -61:
-		return stateGrassBlock
-	default:
-		return stateAir
-	}
-}
-
-// surfaceHeight is the first air y above the superflat surface.
-const surfaceHeight = -60
-
-// chunkData serialises the Level Chunk with Light packet payload for one
-// chunk column, caching the compressed result.
-func (w *world) chunkData(cx, cz int32) ([]byte, error) {
+// chunk returns the chunk for a position, generating the superflat
+// column on first access.
+func (w *world) chunkAt(cx, cz int32) *chunk {
 	key := [2]int32{cx, cz}
 	w.mu.Lock()
-	cached, ok := w.caches[key]
-	w.mu.Unlock()
-	if ok {
-		return cached, nil
+	defer w.mu.Unlock()
+	c, ok := w.chunks[key]
+	if !ok {
+		c = newSuperflatChunk(cx, cz)
+		w.chunks[key] = c
 	}
-
-	// The packet id is written by the caller; the payload starts at
-	// the chunk coordinates.
-	body := protocol.NewWriter()
-	body.Int32(cx)
-	body.Int32(cz)
-	writeChunkData(body, cx, cz)
-	writeLightData(body)
-
-	// The play chunk packet is wrapped in zlib exactly like the old
-	// "compressed chunk" packets? No: the payload travels inside the normal
-	// connection compression. The vanilla packet is plain; keep it plain.
-	out := body.Bytes()
-
-	w.mu.Lock()
-	w.caches[key] = out
-	w.mu.Unlock()
-	return out, nil
+	return c
 }
 
-// writeChunkData writes the heightmaps + section buffer + block entities.
-func writeChunkData(body *protocol.Writer, cx, cz int32) {
-	// Heightmaps: the four client-facing types. All values equal the
-	// surface: the first non-air y is -61, stored as y - minY + 1 = 4.
-	// Heightmap values are packed with 9-bit entries.
-	const heightmapBits = 9
-	const hValue = surfaceHeight - minY // 4: first air y minus world bottom
-	var longs [37]uint64                // 256 entries * 9 bits: 7 per long -> 37 longs
-	packUniform(longs[:], 256, heightmapBits, hValue)
-
-	body.VarInt(3)                         // three client-facing heightmap types (sendToClient: Usage.CLIENT only)
-	for _, typ := range []int32{1, 4, 5} { // WORLD_SURFACE, MOTION_BLOCKING, MOTION_BLOCKING_NO_LEAVES
-		body.VarInt(typ)
-		body.VarInt(int32(len(longs)))
-		for _, l := range longs {
-			body.Int64(int64(l))
-		}
-	}
-
-	// Section buffer: 24 sections, each 2-byte counters + block container
-	// + biome container. Sections are uniform except the floor section.
-	var sec protocol.Writer
-	for i := 0; i < sectionsCount; i++ {
-		base := minY + i*16
-		if base == minY {
-			// floor section: bedrock/dirt/dirt/grass -> 4 non-air layers
-			sec.Int16(4 * 16 * 16)
-			sec.Int16(0) // fluid count
-			// Palette includes air: the floor section also holds the
-			// 12 air layers above the surface block.
-			writeLinearContainer(&sec, []int32{stateBedrock, stateDirt, stateGrassBlock, stateAir}, base)
-		} else {
-			sec.Int16(0)
-			sec.Int16(0)
-			writeSingleValueContainer(&sec, stateAir)
-		}
-		writeSingleValueBiome(&sec)
-	}
-	_ = cx
-	_ = cz
-
-	payload := sec.Bytes()
-	body.VarInt(int32(len(payload)))
-	body.FixedBytes(payload)
-
-	// Block entities: none in superflat.
-	body.VarInt(0)
+// chunkData serialises the Level Chunk payload for one chunk column.
+func (w *world) chunkData(cx, cz int32) ([]byte, error) {
+	return w.chunkAt(cx, cz).payload(), nil
 }
 
-// writeLinearContainer encodes a 4-bit linear-palette container holding the
-// three-layer superflat floor. Palette: bedrock, dirt, grass_block.
-// Entries are stored per block index (y<<8 | z<<4 | x) with 4 bits each;
-// the floor uses the same state for a whole layer.
-func writeLinearContainer(w *protocol.Writer, states []int32, baseY int) {
-	w.Byte(4) // bits per entry -> linear palette
-	// palette: VarInt count + VarInt global ids
-	w.VarInt(int32(len(states)))
-	for _, s := range states {
-		w.VarInt(s)
-	}
-	// storage: 4096 entries * 4 bits = 256 longs, 16 entries per long.
-	// With a linear palette the packed values are palette INDICES, not
-	// global block state ids: layer 0 -> 0 (bedrock), layers 1-2 -> 1
-	// (dirt), layer 3 -> 2 (grass_block), layers 4-15 -> 3 (air).
-	var longs [256]uint64
-	for i := 0; i < sectionBlocks; i++ {
-		y := i >> 8
-		idx := uint64(3) // air above the surface
-		switch y {
-		case 0:
-			idx = 0
-		case 1, 2:
-			idx = 1
-		case 3:
-			idx = 2
-		}
-		cell := i / 16
-		bit := (i % 16) * 4
-		longs[cell] |= idx << bit
-	}
-	for _, l := range longs {
-		w.Int64(int64(l))
-	}
-	_ = baseY
+// setBlock writes a block state and returns true when anything changed.
+func (w *world) setBlock(x, y, z int, state int32) bool {
+	c := w.chunkAt(int32(x>>4), int32(z>>4))
+	return c.setBlock(x&15, y, z&15, state)
 }
 
-// writeSingleValueContainer encodes a bits=0 container with one state.
-func writeSingleValueContainer(w *protocol.Writer, state int32) {
-	w.Byte(0)
-	w.VarInt(state)
-	// zero-length long storage: nothing follows
+// getBlock reads a block state at world coordinates.
+func (w *world) getBlock(x, y, z int) int32 {
+	return w.chunkAt(int32(x>>4), int32(z>>4)).getBlock(x&15, y, z&15)
 }
 
 // writeSingleValueBiome encodes the biome container: plains everywhere.
 func writeSingleValueBiome(w *protocol.Writer) {
 	w.Byte(0)
 	w.VarInt(biomePlains)
-}
-
-// packUniform fills a bit-packed heightmap where every entry is value.
-// The vanilla SimpleBitStorage format packs entries contiguously at bit
-// offset i*bits, straddling long boundaries when 64 is not a multiple of
-// bits; the long count is ceil(entries / (64/bits)).
-func packUniform(dst []uint64, entries int, bits int, value int32) {
-	mask := uint64(1)<<uint(bits) - 1
-	v := uint64(value) & mask
-	for i := 0; i < entries; i++ {
-		bitIndex := i * bits
-		cell, start := bitIndex/64, uint(bitIndex%64)
-		dst[cell] |= v << start
-		if start+uint(bits) > 64 {
-			dst[cell+1] |= v >> (64 - start)
-		}
-	}
 }
 
 // writeLightData writes the sky/block light data. The superflat world has
@@ -256,20 +128,3 @@ var ff32 = func() [32]byte {
 	}
 	return b
 }()
-
-// compressZlib compresses payload for the cached chunk transport if the
-// connection layer does not handle it. Kept for M3 compression tuning.
-func compressZlib(payload []byte) []byte {
-	var buf bytes.Buffer
-	zw := zlib.NewWriter(&buf)
-	_, _ = zw.Write(payload)
-	_ = zw.Close()
-	return buf.Bytes()
-}
-
-// sortStrings is a tiny helper used by the registry synchroniser.
-func sortStrings(s []string) []string {
-	out := append([]string(nil), s...)
-	sort.Strings(out)
-	return out
-}

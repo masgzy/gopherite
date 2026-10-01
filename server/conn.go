@@ -56,6 +56,10 @@ type conn struct {
 	challenge  []byte
 	properties []java.ProfileProperty
 
+	// clientViewDistance is the render distance the client reported
+	// during configuration (0 = not sent).
+	clientViewDistance int
+
 	// play state
 	player *player
 }
@@ -72,6 +76,9 @@ func (s *Server) handleConn(nc net.Conn) {
 		st: stateHandshake,
 	}
 	defer func() {
+		if c.player != nil {
+			c.s.removePlayer(c)
+		}
 		if c.username != "" {
 			log.Printf("%s 断开连接", c.username)
 		}
@@ -102,6 +109,9 @@ func (s *Server) handleConn(nc net.Conn) {
 		}
 		c.rd.Reset(payload)
 		if err := c.dispatch(); err != nil {
+			if !errors.Is(err, errKicked) {
+				log.Printf("%s 会话异常: %v", c.username, err)
+			}
 			return
 		}
 	}
