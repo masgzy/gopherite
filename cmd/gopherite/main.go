@@ -82,6 +82,8 @@ func main() {
 		FaviconPath:        cfg.IconPath,
 		MaxPacketLen:       1 << 21,
 		ReadTimeoutSeconds: cfg.ReadTimeout,
+		LevelName:          cfg.LevelName,
+		ViewDistance:       cfg.ViewDistance,
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -91,7 +93,7 @@ func main() {
 		sig := make(chan os.Signal, 1)
 		signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 		<-sig
-		log.Println(ui.Warn("! 正在关停") + ui.Dim("（世界保存在 M4 落地）..."))
+		log.Println(ui.Warn("! 正在关停") + ui.Dim("（正在保存世界）..."))
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(ctx)

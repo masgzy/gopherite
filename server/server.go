@@ -6,11 +6,13 @@ package server
 import (
 	"context"
 	"fmt"
+	"log"
 	"net"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/masgzy/gopherite/internal/ui"
 	"github.com/masgzy/gopherite/protocol"
 )
 
@@ -54,6 +56,11 @@ type Options struct {
 	// ViewDistance is the server-side chunk radius sent to clients.
 	ViewDistance int
 
+	// LevelName is the world directory under the working dir (vanilla
+	// server.properties level-name). Empty disables persistence — used
+	// by tests.
+	LevelName string
+
 	// KeepAliveInterval overrides the 15s keep-alive period (tests).
 	// Zero means the vanilla default.
 	KeepAliveInterval time.Duration
@@ -73,6 +80,10 @@ type Server struct {
 	wg      sync.WaitGroup
 	closing atomic.Bool
 	favicon string // data URI, computed once at start
+
+	// stop is closed on Shutdown so background loops (autosave) can
+	// exit before the final flush.
+	stop chan struct{}
 
 	// keys is the login RSA keypair, generated lazily on first online-mode
 	// login and reused for the server lifetime.
@@ -179,7 +190,11 @@ func New(opts Options) (*Server, error) {
 	if opts.ViewDistance <= 0 {
 		opts.ViewDistance = 8
 	}
-	s := &Server{opts: opts, world: newWorld(0), players: make(map[*conn]*player)}
+	s := &Server{opts: opts, world: newWorld(0), players: make(map[*conn]*player), stop: make(chan struct{})}
+	if opts.LevelName != "" {
+		// M4: replay persisted chunks before accepting connections.
+		s.world.enableSaving(opts.LevelName)
+	}
 	if f, err := loadFaviconDataURI(opts.FaviconPath); err != nil {
 		return nil, err
 	} else if f != "" {
@@ -214,6 +229,7 @@ func (s *Server) Serve() error {
 		return fmt.Errorf("server: Serve called before Listen")
 	}
 	s.startTicker()
+	s.autosaveLoop()
 	for {
 		c, err := s.ln.Accept()
 		if err != nil {
@@ -244,7 +260,9 @@ func (s *Server) ListenAndServe() error {
 // Shutdown stops accepting new connections and waits for in-flight
 // connections to drain.
 func (s *Server) Shutdown(ctx context.Context) error {
-	s.closing.Store(true)
+	if !s.closing.Swap(true) {
+		close(s.stop)
+	}
 	if s.ln != nil {
 		_ = s.ln.Close()
 	}
@@ -252,9 +270,22 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	go func() { s.wg.Wait(); close(done) }()
 	select {
 	case <-done:
+		s.flushWorld()
 		return nil
 	case <-ctx.Done():
+		go s.flushWorld()
 		return ctx.Err()
+	}
+}
+
+// flushWorld performs the final persistence sweep after all connection
+// goroutines have drained, so no writes race the save.
+func (s *Server) flushWorld() {
+	if s.opts.LevelName == "" {
+		return
+	}
+	if err := s.world.saveAll(); err != nil {
+		log.Printf(ui.Error("X ")+"关停保存失败: %v", err)
 	}
 }
 

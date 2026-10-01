@@ -8,15 +8,26 @@ import (
 
 // world holds the M3 mutable chunk map. The initial terrain is the M2
 // superflat plane (bedrock + 2 dirt + grass at world bottom); blocks can
-// change at runtime through setBlock.
+// change at runtime through setBlock. M4 adds Anvil persistence: chunks
+// that diverge from the generator are flushed to region files.
 type world struct {
 	seed   int64
 	mu     sync.Mutex
 	chunks map[[2]int32]*chunk
+
+	// persistence state (M4)
+	saveDir   string            // empty disables saving
+	persisted map[[2]int32]bool // chunks on disk (loaded or saved)
+	dirty     map[[2]int32]bool // chunks needing a save
 }
 
 func newWorld(seed int64) *world {
-	return &world{seed: seed, chunks: make(map[[2]int32]*chunk)}
+	return &world{
+		seed:      seed,
+		chunks:    make(map[[2]int32]*chunk),
+		persisted: make(map[[2]int32]bool),
+		dirty:     make(map[[2]int32]bool),
+	}
 }
 
 // clockID returns the baked registry index of a world clock (overworld=0,
@@ -72,8 +83,13 @@ func (w *world) chunkData(cx, cz int32) ([]byte, error) {
 
 // setBlock writes a block state and returns true when anything changed.
 func (w *world) setBlock(x, y, z int, state int32) bool {
-	c := w.chunkAt(int32(x>>4), int32(z>>4))
-	return c.setBlock(x&15, y, z&15, state)
+	cx, cz := int32(x>>4), int32(z>>4)
+	c := w.chunkAt(cx, cz)
+	if !c.setBlock(x&15, y, z&15, state) {
+		return false
+	}
+	w.markDirty(cx, cz)
+	return true
 }
 
 // getBlock reads a block state at world coordinates.

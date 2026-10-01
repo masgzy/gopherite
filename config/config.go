@@ -25,6 +25,8 @@ type Config struct {
 	CompressionThreshold int // -1 disables; enforced from M2
 	IconPath             string
 	ReadTimeout          int
+	LevelName            string // world directory, vanilla level-name
+	ViewDistance         int    // server-side chunk radius cap
 }
 
 // Path is the conventional configuration file name.
@@ -67,6 +69,8 @@ func parse(doc string) (*Config, error) {
 		OnlineMode:           true,
 		CompressionThreshold: 256,
 		ReadTimeout:          30,
+		LevelName:            "world",
+		ViewDistance:         8,
 	}
 	for i, line := range strings.Split(doc, "\n") {
 		line = strings.TrimSpace(line)
@@ -96,6 +100,10 @@ func parse(doc string) (*Config, error) {
 			cfg.IconPath = v
 		case "read-timeout":
 			cfg.ReadTimeout, err = strconv.Atoi(v)
+		case "level-name":
+			cfg.LevelName = v
+		case "view-distance":
+			cfg.ViewDistance, err = strconv.Atoi(v)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("line %d: key %s: %w", i+1, k, err)
@@ -103,6 +111,15 @@ func parse(doc string) (*Config, error) {
 	}
 	if cfg.ServerPort < 1 || cfg.ServerPort > 65535 {
 		return nil, fmt.Errorf("server-port %d out of range", cfg.ServerPort)
+	}
+	if cfg.LevelName == "" || cfg.LevelName == "." || cfg.LevelName == ".." || strings.ContainsRune(cfg.LevelName, '/') || strings.ContainsRune(cfg.LevelName, '\\') {
+		return nil, fmt.Errorf("level-name %q invalid", cfg.LevelName)
+	}
+	if cfg.ViewDistance < 2 {
+		cfg.ViewDistance = 2
+	}
+	if cfg.ViewDistance > 32 {
+		cfg.ViewDistance = 32
 	}
 	return cfg, nil
 }
