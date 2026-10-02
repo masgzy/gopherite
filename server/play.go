@@ -137,6 +137,9 @@ func (c *conn) startPlay() error {
 		return err
 	}
 
+	// Command tree (Declare Commands) before the rest of the play UI.
+	c.sendDeclareCommands()
+
 	// Abilities.
 	c.wr.Reset()
 	c.wr.VarInt(v776.PacketPlayAbilities)

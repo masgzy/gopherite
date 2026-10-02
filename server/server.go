@@ -85,6 +85,12 @@ type Server struct {
 	// exit before the final flush.
 	stop chan struct{}
 
+	// timeTicks is the overworld clock (game time in ticks), guarded by mu.
+	timeTicks int64
+
+	// teleportSeq mints teleport ids, guarded by mu.
+	teleportSeq int32
+
 	// started closes once Serve registered its background workers with
 	// the WaitGroup; shutdown paths must observe it before Wait so the
 	// Add/Wait pair stays ordered.
@@ -117,6 +123,25 @@ type Server struct {
 }
 
 // playerListLocked returns the joined players; caller holds mu.
+// nextTeleportID mints sequential teleport ids. Caller holds mu.
+func (s *Server) nextTeleportID() int32 {
+	s.teleportSeq++
+	return s.teleportSeq
+}
+
+// broadcastSystemChat sends a chat message to every connected player.
+// Caller holds no lock.
+func (s *Server) broadcastSystemChat(text string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, p := range s.players {
+		if err := p.conn.sendSystemChat(text); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *Server) playerListLocked() []*player {
 	out := make([]*player, 0, len(s.players))
 	for _, p := range s.players {

@@ -146,6 +146,7 @@ const (
 	PacketPlayHeldSlot         = 0x69
 	PacketPlaySetPlayerInv     = 0x6C
 	PacketPlayTakeItemEntity   = 0x7C
+	PacketPlayCommands         = 0x10
 	PacketPlayCBContainerClose = 0x11
 	PacketPlayContainerContent = 0x12
 	PacketPlayContainerSetSlot = 0x14

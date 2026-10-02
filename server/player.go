@@ -40,6 +40,9 @@ type player struct {
 	// nextWindowID hands out server-side container ids (1+).
 	nextWindowID int32
 
+	// gameMode mirrors the gamemode change game event (0 survival..).
+	gameMode int32
+
 	// seenEnt holds the entity ids streamed to this player, guarded by
 	// Server.mu (ticker entity sync touches it).
 	seenEnt map[int32]bool

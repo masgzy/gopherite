@@ -83,8 +83,8 @@ func TestCraftingMatch(t *testing.T) {
 	// pushed into a corner of the 3x3 grid).
 	expectResult(t, grid9(t, "PP-", "PP-", "---"), "minecraft:crafting_table", 1)
 	expectResult(t, grid9(t, "--P", "--P", "---"), "minecraft:stick", 4) // column = sticks
-	expectResult(t, grid9(t, "P-P", "---", "---"), "") // horizontal gap, no recipe
-	expectResult(t, grid9(t, "P--", "P--", "--P"), "") // odd layout, no match
+	expectResult(t, grid9(t, "P-P", "---", "---"), "")                   // horizontal gap, no recipe
+	expectResult(t, grid9(t, "P--", "P--", "--P"), "")                   // odd layout, no match
 	// Shaped with mirror: wooden axe ("PP/PS/ S").
 	expectResult(t, grid9(t, "PP-", "PS-", "-S-"), "minecraft:wooden_axe", 1)
 	expectResult(t, grid9(t, "-PP", "-SP", "-S-"), "minecraft:wooden_axe", 1)
@@ -136,8 +136,8 @@ func TestMenuSlotMapping(t *testing.T) {
 	p := &player{}
 	p.armor[0] = invSlot{item: 90, count: 1} // head
 	p.offhand = invSlot{item: 91, count: 1}
-	p.slots[0] = invSlot{item: 1, count: 2}  // hotbar 0
-	p.slots[9] = invSlot{item: 2, count: 3}  // main 9
+	p.slots[0] = invSlot{item: 1, count: 2} // hotbar 0
+	p.slots[9] = invSlot{item: 2, count: 3} // main 9
 	m := newInventoryMenu()
 	if got := m.get(p, 36); got.item != 1 {
 		t.Fatalf("wire 36 should be hotbar 0, got %+v", got)

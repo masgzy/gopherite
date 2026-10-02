@@ -561,6 +561,8 @@ configDone:
 				_, _ = rr.VarInt()
 				_, _ = rr.VarInt()
 			}
+		case v776.PacketPlayCommands:
+			// Declare Commands: payload not needed for the bot.
 		case v776.PacketPlayContainerContent:
 			// M7 full inventory-menu sync: window, state, 46 slots + carried.
 			_, _ = rr.VarInt() // container id
