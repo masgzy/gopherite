@@ -136,6 +136,7 @@ const (
 	PacketPlayPing             = 0x3D
 	PacketPlayAbilities        = 0x40
 	PacketPlayPlayerInfo       = 0x46
+	PacketPlayPlayerInfoRemove = 0x45
 	PacketPlayPlayerPosition   = 0x48
 	PacketPlayRemoveEntities   = 0x4D
 	PacketPlayCacheCenter      = 0x5E
@@ -180,7 +181,9 @@ const (
 
 // Entity type registry ids (protocol_id from reports/registries.json).
 const (
+	EntityTypeXPOrb   = 49  // minecraft:experience_orb
 	EntityTypeItem    = 71  // minecraft:item
+	EntityTypePlayer  = 156 // minecraft:player
 	EntityTypeChicken = 26  // minecraft:chicken
 	EntityTypeCow     = 30  // minecraft:cow
 	EntityTypePig     = 100 // minecraft:pig

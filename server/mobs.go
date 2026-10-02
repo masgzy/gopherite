@@ -101,6 +101,9 @@ type mobEntity struct {
 
 	blocked bool // horizontal collision flag for the hop logic
 
+	fallDistance   float32
+	pendingFallDmg float32 // consumed by tickEntities after tick()
+
 	nx, ny, nz  float64
 	hasNet      bool
 	nyaw, nhead float32
@@ -296,6 +299,16 @@ func (m *mobEntity) tick(s *Server) {
 		m.blocked = false
 	}
 
+	// Fall damage bookkeeping (vanilla: safe fall <= 3 blocks).
+	if m.ground && m.fallDistance > 0 {
+		if m.fallDistance > 3.0 {
+			m.pendingFallDmg = float32(math.Floor(float64(m.fallDistance - 3.0)))
+		}
+		m.fallDistance = 0
+	} else if m.vy < 0 {
+		m.fallDistance -= float32(m.vy)
+	}
+
 	// Head follows the body with a little life-like lag.
 	m.headYaw = m.yaw
 	m.pitch = 0
@@ -366,6 +379,13 @@ func (s *Server) hurtMobLocked(m *mobEntity, attacker *player, dmg float32) {
 // dropMobLootLocked scatters the mob's drops at its position. Caller
 // holds Server.mu (spawnEntityLocked expects it).
 func (s *Server) dropMobLootLocked(m *mobEntity) {
+	// XP: adults drop 1-3 orbs' worth (chicken 1) in vanilla.
+	xp := int32(1)
+	if m.def.name != "chicken" {
+		xp = 1 + rand.Int31n(3)
+	}
+	orb := newXPOrbEntity(s.allocEntityID(), m.x, m.y+0.3, m.z, xp)
+	s.spawnEntityLocked(orb)
 	for _, d := range m.def.drops {
 		if d.max == 0 {
 			continue
@@ -469,6 +489,7 @@ func (c *conn) handleAttack(targetID int32) error {
 	}
 
 	p.lastAttackTick = s.tickCount
+	s.broadcastSwing(p)
 	dmg := float32(1)
 	if held := p.slots[p.heldSlot]; held.count > 0 {
 		if w, ok := weaponDamage[held.item]; ok {
@@ -479,4 +500,89 @@ func (c *conn) handleAttack(targetID int32) error {
 	p.exhaustion += 0.1
 	s.hurtMobLocked(m, p, dmg)
 	return nil
+}
+
+// mobFallDamage applies a pending landing hit; runs after tick() on the
+// ticker goroutine with the lock order Server.mu -> mob.mu.
+func (s *Server) mobFallDamage(m *mobEntity, dmg float32) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.deathTicks > 0 || dmg <= 0 {
+		return
+	}
+	m.health -= dmg
+	tyaw := float32(0)
+	body := protocol.NewWriter()
+	body.VarInt(v776.PacketPlayDamageEvent)
+	java.WriteDamageEvent(body, m.id, v776.DamageTypeFall, -1, -1)
+	hurtBody := protocol.NewWriter()
+	hurtBody.VarInt(v776.PacketPlayHurtAnimation)
+	java.WriteHurtAnimation(hurtBody, m.id, tyaw)
+	for _, p := range s.players {
+		if p.seenEnt[m.id] {
+			_ = p.conn.sendPacket(body.Bytes())
+			_ = p.conn.sendPacket(hurtBody.Bytes())
+		}
+	}
+	if m.health <= 0 {
+		m.deathTicks = mobDeathAnimTicks
+		m.walking = false
+		m.vx, m.vy, m.vz = 0, 0, 0
+		eventBody := protocol.NewWriter()
+		eventBody.VarInt(v776.PacketPlayEntityEvent)
+		java.WriteEntityEvent(eventBody, m.id, 3)
+		for _, p := range s.players {
+			if p.seenEnt[m.id] {
+				_ = p.conn.sendPacket(eventBody.Bytes())
+			}
+		}
+		s.dropMobLootLocked(m)
+	}
+}
+
+// topUpMobs refills the passive herd toward its 24-head cap, spawning a
+// few animals around a random online player every pass.
+func (s *Server) topUpMobs() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.players) == 0 {
+		return
+	}
+	const mobCap = 24
+	count := 0
+	for _, e := range s.entities {
+		if _, ok := e.(*mobEntity); ok {
+			count++
+		}
+	}
+	if count >= mobCap {
+		return
+	}
+	var anchor *player
+	for _, p := range s.players {
+		anchor = p
+		break
+	}
+	if anchor == nil {
+		return
+	}
+	budget := mobCap - count
+	if budget > 4 {
+		budget = 4
+	}
+	for n := 0; n < budget; n++ {
+		def := &mobDefs[rand.Intn(len(mobDefs))]
+		angle := rand.Float64() * 2 * math.Pi
+		radius := 16 + rand.Float64()*24
+		x := math.Round(anchor.x+math.Cos(angle)*radius) + 0.5
+		z := math.Round(anchor.z+math.Sin(angle)*radius) + 0.5
+		y := float64(s.surfaceY(int(x), int(z)))
+		if s.boxCollides(x, y, z, def.width, def.height) {
+			continue
+		}
+		m := newMobEntity(def, s.allocEntityID(), x, y, z)
+		s.entities[m.id] = m
+	}
 }

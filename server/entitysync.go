@@ -33,6 +33,15 @@ func (s *Server) tickEntities() {
 
 	for _, e := range ids {
 		e.tick(s)
+		if m, ok := e.(*mobEntity); ok {
+			m.mu.Lock()
+			dmg := m.pendingFallDmg
+			m.pendingFallDmg = 0
+			m.mu.Unlock()
+			if dmg > 0 {
+				s.mobFallDamage(m, dmg)
+			}
+		}
 	}
 
 	s.mu.Lock()
@@ -49,6 +58,7 @@ func (s *Server) tickEntities() {
 	}
 
 	s.syncEntities()
+	s.syncPlayerVisibility()
 }
 
 // syncEntities reconciles every player's entity set: spawn, despawn,

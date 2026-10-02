@@ -157,11 +157,16 @@ func (s *Server) addPlayer(p *player) {
 	s.mu.Unlock()
 }
 
-// removePlayer unregisters a disconnecting player.
+// removePlayer unregisters a disconnecting player and retires them from
+// every other client's tab list and view.
 func (s *Server) removePlayer(c *conn) {
 	s.mu.Lock()
+	p := s.players[c]
 	delete(s.players, c)
 	s.mu.Unlock()
+	if p != nil {
+		s.broadcastRemovePlayer(p)
+	}
 }
 
 // startTicker runs the 20 TPS server tick loop until shutdown. M3 uses
@@ -212,6 +217,12 @@ func (s *Server) tickOnce() {
 	// M8: survival ticks (hunger, regen, void, eating) for every player.
 	for _, p := range s.playerListLocked() {
 		s.tickSurvival(p)
+	}
+
+	// M8.5: top the passive herd back up every 20 seconds (production
+	// worlds only — tests construct focused entity sets).
+	if s.opts.LevelName != "" && s.tickCount%400 == 0 {
+		s.topUpMobs()
 	}
 
 	s.stats.record(time.Since(start), time.Now())

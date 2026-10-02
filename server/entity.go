@@ -225,6 +225,149 @@ func (e *itemEntity) tryPickup(s *Server) {
 	taker.conn.sendTakeItem(e.id, taker.id, taken)
 }
 
+// xpOrbEntity is a floating experience orb: item-like physics plus a
+// magnet pull toward nearby players. The orb value rides server-side only
+// (the client renders the default small orb without metadata).
+type xpOrbEntity struct {
+	mu         sync.Mutex
+	id         int32
+	uuid       [16]byte
+	x, y, z    float64
+	vx, vy, vz float64
+	ground     bool
+
+	value int32
+	age   int32
+
+	nx, ny, nz float64
+	hasNet     bool
+	dead       bool
+}
+
+func newXPOrbEntity(id int32, x, y, z float64, value int32) *xpOrbEntity {
+	var u [16]byte
+	_, _ = rand.Read(u[:])
+	u[6] = (u[6] & 0x0F) | 0x40
+	u[8] = (u[8] & 0x3F) | 0x80
+	return &xpOrbEntity{id: id, uuid: u, x: x, y: y, z: z, value: value}
+}
+
+func (e *xpOrbEntity) entityID() int32 { return e.id }
+func (e *xpOrbEntity) typeID() int32   { return v776.EntityTypeXPOrb }
+func (e *xpOrbEntity) xPos() (float64, float64, float64) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.x, e.y, e.z
+}
+func (e *xpOrbEntity) onGroundFlag() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.ground
+}
+func (e *xpOrbEntity) alive() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return !e.dead
+}
+func (e *xpOrbEntity) metadataDirty() bool { return false }
+func (e *xpOrbEntity) clearMetadataDirty() {}
+func (e *xpOrbEntity) netPos() (float64, float64, float64, bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.nx, e.ny, e.nz, e.hasNet
+}
+func (e *xpOrbEntity) setNetPos(x, y, z float64) {
+	e.mu.Lock()
+	e.nx, e.ny, e.nz, e.hasNet = x, y, z, true
+	e.mu.Unlock()
+}
+
+// tick: gravity, drag, magnet pull, pickup, aging — mirrors itemEntity.
+func (e *xpOrbEntity) tick(s *Server) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.age++
+	if e.age >= itemLifespanTicks {
+		e.dead = true
+		return
+	}
+
+	// Magnet: drift toward the nearest player within 4 blocks.
+	s.mu.Lock()
+	var tx, ty, tz float64
+	found := false
+	for _, p := range s.players {
+		dx := p.x - e.x
+		dy := p.y + 0.5 - e.y
+		dz := p.z - e.z
+		d2 := dx*dx + dy*dy + dz*dz
+		if d2 < 16 && d2 > 0.01 {
+			tx, ty, tz, found = dx, dy, dz, true
+			break
+		}
+	}
+	var taker *player
+	if found {
+		d := math.Sqrt(tx*tx + ty*ty + tz*tz)
+		if d < 0.6 {
+			for _, p := range s.players {
+				dx := p.x - e.x
+				dy := p.y + 0.5 - e.y
+				dz := p.z - e.z
+				if dx*dx+dy*dy+dz*dz < 1.0 {
+					taker = p
+					break
+				}
+			}
+		} else {
+			e.vx += tx / d * 0.035
+			e.vy += ty / d * 0.035
+			e.vz += tz / d * 0.035
+		}
+	}
+	if taker != nil {
+		taker.addXP(e.value)
+	}
+	s.mu.Unlock()
+	if taker != nil {
+		e.dead = true
+		taker.conn.sendTakeItem(e.id, taker.id, 1)
+		return
+	}
+
+	e.vy -= itemGravity
+	e.vx *= itemAirDragH
+	e.vz *= itemAirDragH
+	if e.ground {
+		e.vx *= itemGroundFriction
+		e.vz *= itemGroundFriction
+	}
+	if e.vy < itemTerminalVy {
+		e.vy = itemTerminalVy
+	}
+	ny := e.y + e.vy
+	if e.vy != 0 && s.entityBoxCollides(e.x, ny, e.z) {
+		if e.vy < 0 {
+			ny = math.Floor(ny) + 1
+		}
+		e.vy = 0
+	}
+	e.y = ny
+	e.ground = s.entityBoxCollides(e.x, e.y-0.001, e.z)
+	nx := e.x + e.vx
+	if e.vx != 0 && s.entityBoxCollides(nx, e.y, e.z) {
+		nx = e.x
+		e.vx = 0
+	}
+	e.x = nx
+	nz := e.z + e.vz
+	if e.vz != 0 && s.entityBoxCollides(e.x, e.y, nz) {
+		nz = e.z
+		e.vz = 0
+	}
+	e.z = nz
+}
+
 // ---- manager ----
 
 // spawnEntity registers an entity; it starts streaming to nearby players
@@ -267,6 +410,8 @@ func (s *Server) encodeSpawn(w *protocol.Writer, e entity) {
 		java.WriteAddEntity(w, it.id, it.uuid, it.typeID(), it.x, it.y, it.z, 0, 0, 0, 0, 0, 0, 1)
 	case *mobEntity:
 		encodeMobSpawn(w, it)
+	case *xpOrbEntity:
+		java.WriteAddEntity(w, it.id, it.uuid, it.typeID(), it.x, it.y, it.z, 0, 0, 0, 0, 0, 0, 0)
 	default:
 		// future types plug in here
 		java.WriteAddEntity(w, e.entityID(), [16]byte{}, e.typeID(), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)

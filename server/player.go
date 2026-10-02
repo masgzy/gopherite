@@ -67,6 +67,14 @@ type player struct {
 	// Server.mu (ticker entity sync touches it).
 	seenEnt map[int32]bool
 
+	// seenPlayers tracks which OTHER players this client sees (M8.5);
+	// psX..psPitch is the per-tick move baseline for this player's own
+	// broadcasts. Guarded by Server.mu.
+	seenPlayers    map[int32]bool
+	psX, psY, psZ  float64
+	psYaw, psPitch float32
+	psHas          bool
+
 	// slots is the 36-slot inventory model (0-8 hotbar), guarded by
 	// Server.mu. Zero ids are empty stacks.
 	slots [36]invSlot

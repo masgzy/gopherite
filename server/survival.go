@@ -208,6 +208,8 @@ func (s *Server) killPlayerLocked(p *player, message string) {
 	}
 	p.expProgress, p.expLevel, p.expTotal = 0, 0, 0
 	_ = p.conn.sendCombatKill(p.id, message)
+	// Everyone tracking the victim sees the fall-over animation.
+	s.broadcastEntityEventToTrackers(p.id, 3, p)
 }
 
 // deathMessage renders the chat line for a damage type (zh_CN flavour,

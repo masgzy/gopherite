@@ -210,18 +210,48 @@ func (c *conn) startPlay() error {
 	// Full inventory-menu state (vanilla sendAllDataToRemote on initMenu).
 	p.invMenu.sendAll(c)
 
-	// Tab list initialisation with this player only.
-	c.wr.Reset()
-	c.wr.VarInt(v776.PacketPlayPlayerInfo)
-	java.WritePlayPlayerInfo(c.wr, []java.PlayerInfoEntry{{
+	// Tab list: the newcomer receives everyone; everyone else receives
+	// the newcomer (M8.5 multiplayer visibility).
+	entry := java.PlayerInfoEntry{
 		UUID:     c.profileID,
 		Name:     c.username,
 		GameMode: 0,
 		Listed:   true,
 		Latency:  0,
-	}})
+	}
+	c.s.mu.Lock()
+	entries := []java.PlayerInfoEntry{entry}
+	for _, q := range c.s.players {
+		if q != p {
+			entries = append(entries, java.PlayerInfoEntry{
+				UUID:     q.conn.profileID,
+				Name:     q.name,
+				GameMode: q.gameMode,
+				Listed:   true,
+				Latency:  0,
+			})
+		}
+	}
+	var otherConns []*conn
+	for q := range c.s.players {
+		if q != c {
+			otherConns = append(otherConns, q)
+		}
+	}
+	c.s.mu.Unlock()
+	c.wr.Reset()
+	c.wr.VarInt(v776.PacketPlayPlayerInfo)
+	java.WritePlayPlayerInfo(c.wr, entries)
 	if err := c.sendPacket(c.wr.Bytes()); err != nil {
 		return err
+	}
+	if len(otherConns) > 0 {
+		addBody := protocol.NewWriter()
+		addBody.VarInt(v776.PacketPlayPlayerInfo)
+		java.WritePlayPlayerInfo(addBody, []java.PlayerInfoEntry{entry})
+		for _, q := range otherConns {
+			_ = q.sendPacket(addBody.Bytes())
+		}
 	}
 
 	// Teleport to spawn (absolute).

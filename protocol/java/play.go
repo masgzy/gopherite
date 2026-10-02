@@ -185,6 +185,15 @@ func WritePlayPlayerPosition(w *protocol.Writer, p ClientboundPlayerPosition) {
 	w.Int32(p.Relatives)
 }
 
+// WritePlayPlayerInfoRemove encodes minecraft:player_info_remove: a
+// VarInt count followed by the profile UUIDs to drop from the tab list.
+func WritePlayPlayerInfoRemove(w *protocol.Writer, uuids [][16]byte) {
+	w.VarInt(int32(len(uuids)))
+	for _, u := range uuids {
+		w.UUID(u)
+	}
+}
+
 // WritePlayCacheCenter encodes the chunk cache centre packet.
 func WritePlayCacheCenter(w *protocol.Writer, chunkX, chunkZ int32) {
 	w.VarInt(chunkX).VarInt(chunkZ)
