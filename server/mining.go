@@ -180,14 +180,53 @@ func (s *Server) advanceMining(p *player) error {
 	return nil
 }
 
-// breakBlock replaces a block with air and broadcasts the change to
-// every player that can see the chunk.
+// breakBlock replaces a block with air, broadcasts the change to every
+// player that can see the chunk and spawns the block's drop as an item
+// entity (M5).
 func (s *Server) breakBlock(breaker *player, x, y, z int) {
+	dropped := s.world.getBlock(x, y, z)
 	if !s.world.setBlock(x, y, z, stateAir) {
 		return
 	}
 	s.broadcastBlockUpdate(int32(x), int32(y), int32(z), stateAir)
+	s.spawnBlockDrop(x, y, z, dropped)
 	log.Printf(ui.Success("OK ")+"%s 挖掉了 (%d, %d, %d)", breaker.name, x, y, z)
+}
+
+// blockDrops maps blocks to their vanilla drop item: stone drops
+// cobblestone, grass drops dirt, everything else drops itself when an
+// item form exists.
+func blockDrops(name string) (string, bool) {
+	switch name {
+	case "minecraft:stone":
+		return "minecraft:cobblestone", true
+	case "minecraft:grass_block":
+		return "minecraft:dirt", true
+	default:
+		return name, true
+	}
+}
+
+// spawnBlockDrop turns a broken block into an item entity at the block
+// center. Unknown item forms (rare superflat) skip the drop.
+func (s *Server) spawnBlockDrop(x, y, z int, state int32) {
+	name := blockNameOf(int(state))
+	if name == "" {
+		return
+	}
+	drop, ok := blockDrops(name)
+	itemID, ok2 := itemIDByName[drop]
+	if !ok2 {
+		// fall back to the block's own item id when a mapping exists
+		if id, has := itemIDByName[name]; has {
+			itemID = id
+		} else {
+			return
+		}
+	}
+	_ = ok
+	e := newItemEntity(s.allocEntityID(), float64(x)+0.5, float64(y)+0.4, float64(z)+0.5, itemID, 1)
+	s.spawnEntity(e)
 }
 
 // broadcastBlockUpdate sends a Block Update to every player whose

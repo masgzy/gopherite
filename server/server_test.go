@@ -42,6 +42,11 @@ func startTestServer(t *testing.T) *Server {
 		t.Fatalf("listen: %v", err)
 	}
 	go func() { _ = s.Serve() }()
+	select {
+	case <-s.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("server never signalled startup")
+	}
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
@@ -773,6 +778,11 @@ func startEncryptedTestServer(t *testing.T) *Server {
 		t.Fatalf("listen: %v", err)
 	}
 	go func() { _ = s.Serve() }()
+	select {
+	case <-s.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("server never signalled startup")
+	}
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
@@ -1081,6 +1091,11 @@ func TestOnlineModeHasJoined(t *testing.T) {
 		t.Fatalf("listen: %v", err)
 	}
 	go func() { _ = s.Serve() }()
+	select {
+	case <-s.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("server never signalled startup")
+	}
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()

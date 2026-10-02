@@ -109,6 +109,7 @@ const (
 
 	// Play state.
 	PacketPlayBundle           = 0x00
+	PacketPlayAddEntity        = 0x01
 	PacketPlayBossEvent        = 0x09
 	PacketPlayBlockDestruction = 0x05
 	PacketPlayBlockChangedAck  = 0x04
@@ -123,19 +124,29 @@ const (
 	PacketPlayCBKeepAlive      = 0x2C
 	PacketPlayLevelChunk       = 0x2D
 	PacketPlayDifficulty       = 0x0A
+	PacketPlayMoveEntityPos    = 0x35
 	PacketPlayPayload          = 0x18
 	PacketPlayLogin            = 0x31
 	PacketPlayPing             = 0x3D
 	PacketPlayAbilities        = 0x40
 	PacketPlayPlayerInfo       = 0x46
 	PacketPlayPlayerPosition   = 0x48
+	PacketPlayRemoveEntities   = 0x4D
 	PacketPlayCacheCenter      = 0x5E
 	PacketPlayCacheRadius      = 0x5F
+	PacketPlaySetEntityData    = 0x63
+	PacketPlaySetEntityMotion  = 0x65
 	PacketPlaySpawnPosition    = 0x61
 	PacketPlayHeldSlot         = 0x69
 	PacketPlaySetPlayerInv     = 0x6C
+	PacketPlayTakeItemEntity   = 0x7C
 	PacketPlaySetTime          = 0x71
 	PacketPlaySystemChat       = 0x79
 	PacketPlayTabList          = 0x7A
 	PacketPlayUpdateTags       = 0x86
+)
+
+// Entity type registry ids (protocol_id from reports/registries.json).
+const (
+	EntityTypeItem = 71 // minecraft:item
 )

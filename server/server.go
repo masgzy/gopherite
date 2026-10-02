@@ -85,6 +85,11 @@ type Server struct {
 	// exit before the final flush.
 	stop chan struct{}
 
+	// started closes once Serve registered its background workers with
+	// the WaitGroup; shutdown paths must observe it before Wait so the
+	// Add/Wait pair stays ordered.
+	started chan struct{}
+
 	// keys is the login RSA keypair, generated lazily on first online-mode
 	// login and reused for the server lifetime.
 	keys *protocol.KeyPair
@@ -100,8 +105,15 @@ type Server struct {
 	tickCount int64
 
 	// players are the joined, in-play players; guarded by mu together
-	// with player.seen and player.mining (the ticker touches both).
+	// with player.seen, player.seenEnt and player.mining (the ticker
+	// touches both).
 	players map[*conn]*player
+
+	// entities holds every live tracked entity (M5); guarded by mu.
+	entities map[int32]entity
+
+	// nextEntityID is the vanilla entity id counter; players included.
+	nextEntityID atomic.Int32
 }
 
 // playerListLocked returns the joined players; caller holds mu.
@@ -169,6 +181,9 @@ func (s *Server) tickOnce() {
 		_ = s.advanceMining(p)
 	}
 
+	// M5: entity ticks (item physics, pickup) + tracker reconciliation.
+	s.tickEntities()
+
 	s.stats.record(time.Since(start), time.Now())
 	s.tickCount++
 	if s.tickCount%20 == 0 {
@@ -190,7 +205,8 @@ func New(opts Options) (*Server, error) {
 	if opts.ViewDistance <= 0 {
 		opts.ViewDistance = 8
 	}
-	s := &Server{opts: opts, world: newWorld(0), players: make(map[*conn]*player), stop: make(chan struct{})}
+	s := &Server{opts: opts, world: newWorld(0), players: make(map[*conn]*player), entities: make(map[int32]entity), stop: make(chan struct{}), started: make(chan struct{})}
+	s.nextEntityID.Store(0) // first allocEntityID() yields 1, matching tests
 	if opts.LevelName != "" {
 		// M4: replay persisted chunks before accepting connections.
 		s.world.enableSaving(opts.LevelName)
@@ -230,6 +246,7 @@ func (s *Server) Serve() error {
 	}
 	s.startTicker()
 	s.autosaveLoop()
+	close(s.started)
 	for {
 		c, err := s.ln.Accept()
 		if err != nil {
@@ -241,7 +258,11 @@ func (s *Server) Serve() error {
 			}
 			return fmt.Errorf("server: accept: %w", err)
 		}
+		// Register under the server lock so a concurrent Shutdown's
+		// Wait (which takes the lock once) can never overtake the Add.
+		s.mu.Lock()
 		s.wg.Add(1)
+		s.mu.Unlock()
 		go func() {
 			defer s.wg.Done()
 			s.handleConn(c)
@@ -267,7 +288,14 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		_ = s.ln.Close()
 	}
 	done := make(chan struct{})
-	go func() { s.wg.Wait(); close(done) }()
+	go func() {
+		// Order against any in-flight wg.Add: the lock handoff below
+		// serialises this Wait with the registration critical sections.
+		s.mu.Lock()
+		s.mu.Unlock()
+		s.wg.Wait()
+		close(done)
+	}()
 	select {
 	case <-done:
 		s.flushWorld()

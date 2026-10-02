@@ -24,12 +24,17 @@ var defaultHotbar = []string{
 }
 
 // sendStarterInventory syncs the hotbar via the 26.2 per-slot inventory
-// packet. Non-block items and unknown names are skipped (empty slot).
+// packet and mirrors it into the server model so pickups can merge.
+// Non-block items and unknown names are skipped (empty slot).
 func (c *conn) sendStarterInventory() {
+	p := c.player
 	for slot, item := range defaultHotbar {
 		id, ok := itemIDByName[item]
 		if !ok {
 			continue
+		}
+		if p != nil {
+			p.slots[slot] = invSlot{item: id, count: 64}
 		}
 		body := protocol.NewWriter()
 		body.VarInt(v776.PacketPlaySetPlayerInv)
@@ -38,6 +43,53 @@ func (c *conn) sendStarterInventory() {
 			return
 		}
 	}
+}
+
+// giveItem adds a stack to the player inventory: merge into the first
+// same-item stack with room, otherwise the first empty slot (0-35).
+// Returns the leftover count that did NOT fit; the caller picks up only
+// what fits, vanilla-style. Caller holds Server.mu.
+func (p *player) giveItem(itemID, count int32) int32 {
+	// Merge pass.
+	for i := range p.slots {
+		if p.slots[i].item == itemID && p.slots[i].count > 0 && p.slots[i].count < itemMaxStack {
+			room := itemMaxStack - p.slots[i].count
+			take := count
+			if take > room {
+				take = room
+			}
+			p.slots[i].count += take
+			count -= take
+			p.conn.sendSlot(int32(i), p.slots[i])
+			if count == 0 {
+				return 0
+			}
+		}
+	}
+	// Empty-slot pass.
+	for i := range p.slots {
+		if p.slots[i].count == 0 {
+			take := count
+			if take > itemMaxStack {
+				take = itemMaxStack
+			}
+			p.slots[i] = invSlot{item: itemID, count: take}
+			count -= take
+			p.conn.sendSlot(int32(i), p.slots[i])
+			if count == 0 {
+				return 0
+			}
+		}
+	}
+	return count
+}
+
+// sendSlot pushes one inventory cell to the client.
+func (c *conn) sendSlot(slot int32, s invSlot) {
+	body := protocol.NewWriter()
+	body.VarInt(v776.PacketPlaySetPlayerInv)
+	java.WriteSetPlayerInventory(body, slot, s.item, s.count)
+	_ = c.sendPacket(body.Bytes())
 }
 
 // handleSetCarriedItem tracks the client's hotbar selection so placement

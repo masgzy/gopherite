@@ -27,4 +27,19 @@ type player struct {
 	// heldSlot is the client's hotbar selection (0-8), guarded by
 	// Server.mu like the rest of the player model.
 	heldSlot int32
+
+	// seenEnt holds the entity ids streamed to this player, guarded by
+	// Server.mu (ticker entity sync touches it).
+	seenEnt map[int32]bool
+
+	// slots is the 36-slot inventory model (0-8 hotbar), guarded by
+	// Server.mu. Zero ids are empty stacks.
+	slots [36]invSlot
+}
+
+// invSlot is one inventory cell: a vanilla item registry id and stack
+// size; item 0 / count 0 is an empty slot.
+type invSlot struct {
+	item  int32
+	count int32
 }

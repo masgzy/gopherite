@@ -116,9 +116,9 @@ gopherite/
 - [x] **M0** project skeleton, community files, CI
 - [x] **M1** network layer + server list ping
 - [x] **M2** login flow (offline + online modes, encryption, compression) + superflat chunks + walking in a world
-- [x] **M3** block breaking/placing, chunk management, simplified lighting (current)
+- [x] **M3** block breaking/placing, chunk management, simplified lighting
 - [x] **M4** full NBT + Anvil world persistence
-- [ ] **M5** entities (physics, basic AI)
+- [x] **M5** entities (physics, basic AI) (current)
 - [ ] **M6** registry pipeline: extract blocks/items/recipes from the vanilla jar and generate Go code
 - [ ] **M7** inventory / crafting / commands (Brigadier port) / redstone
 - [ ] **P**  Paper / Purpur behaviour parity
