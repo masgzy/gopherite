@@ -119,8 +119,8 @@ gopherite/
 - [x] **M3** block breaking/placing, chunk management, simplified lighting
 - [x] **M4** full NBT + Anvil world persistence
 - [x] **M5** entities (physics, basic AI)
-- [x] **M6** registry pipeline: extract blocks/items/recipes from the vanilla jar and generate Go code (current)
-- [ ] **M7** inventory / crafting / commands (Brigadier port) / redstone
+- [x] **M6** registry pipeline: extract blocks/items/recipes from the vanilla jar and generate Go code
+- [x] **M7** inventory / crafting / commands (Brigadier port) / basic redstone (current)
 - [ ] **P**  Paper / Purpur behaviour parity
 
 ## 🧑‍💻 Development

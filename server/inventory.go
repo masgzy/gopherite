@@ -143,12 +143,20 @@ func (c *conn) placeBlock(u java.ServerboundUseItemOn) {
 	if p == nil || p.heldSlot < 0 || p.heldSlot >= int32(len(p.slots)) {
 		return
 	}
-	// Interact blocks first: a crafting table opens its 3x3 grid menu.
+	// Interact blocks first: a crafting table opens its 3x3 grid menu
+	// and a lever flips (unless the player sneaks to place against it).
 	if !p.sneaking {
 		state := c.s.world.getBlock(int(u.X), int(u.Y), int(u.Z))
-		if blockNameOf(int(state)) == "minecraft:crafting_table" {
+		name := blockNameOf(int(state))
+		if name == "minecraft:crafting_table" {
 			c.s.mu.Lock()
 			c.openCrafting()
+			c.s.mu.Unlock()
+			return
+		}
+		if name == "minecraft:lever" {
+			c.s.mu.Lock()
+			c.s.toggleLever(int(u.X), int(u.Y), int(u.Z))
 			c.s.mu.Unlock()
 			return
 		}
@@ -180,6 +188,9 @@ func (c *conn) placeBlock(u java.ServerboundUseItemOn) {
 	p.slots[p.heldSlot] = held
 	c.sendSlot(p.heldSlot, held)
 	c.s.broadcastBlockUpdate(int32(x), int32(y), int32(z), int32(state))
+	c.s.mu.Lock()
+	c.s.redstoneUpdate(x, y, z)
+	c.s.mu.Unlock()
 	log.Printf(ui.Success("OK ")+"%s 放置了 %s (%d, %d, %d)", p.name, block, x, y, z)
 }
 

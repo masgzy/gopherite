@@ -208,6 +208,9 @@ func (s *Server) breakBlock(breaker *player, x, y, z int) {
 	}
 	s.broadcastBlockUpdate(int32(x), int32(y), int32(z), stateAir)
 	s.spawnBlockDrop(x, y, z, dropped)
+	if isComponent(blockNameOf(int(dropped))) {
+		s.redstoneUpdate(x, y, z)
+	}
 	log.Printf(ui.Success("OK ")+"%s 挖掉了 (%d, %d, %d)", breaker.name, x, y, z)
 }
 
@@ -220,6 +223,8 @@ func blockDrops(name string) (string, bool) {
 		return "minecraft:cobblestone", true
 	case "minecraft:grass_block":
 		return "minecraft:dirt", true
+	case "minecraft:redstone_wire":
+		return "minecraft:redstone", true
 	default:
 		return name, true
 	}
@@ -260,6 +265,24 @@ func (s *Server) broadcastBlockUpdate(x, y, z int32, state int32) {
 	}
 	s.mu.Unlock()
 
+	body := protocol.NewWriter()
+	body.VarInt(v776.PacketPlayBlockUpdate)
+	java.WriteBlockUpdate(body, x, y, z, state)
+	for _, c := range targets {
+		_ = c.sendPacket(body.Bytes())
+	}
+}
+
+// broadcastBlockUpdateLocked is the variant for paths that already hold
+// Server.mu (redstone recomputation batches).
+func (s *Server) broadcastBlockUpdateLocked(x, y, z int32, state int32) {
+	key := [2]int32{int32(x >> 4), int32(z >> 4)}
+	var targets []*conn
+	for _, p := range s.players {
+		if p.seen[key] {
+			targets = append(targets, p.conn)
+		}
+	}
 	body := protocol.NewWriter()
 	body.VarInt(v776.PacketPlayBlockUpdate)
 	java.WriteBlockUpdate(body, x, y, z, state)

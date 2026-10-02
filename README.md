@@ -118,8 +118,8 @@ gopherite/
 - [x] **M3** 方块破坏/放置、区块管理与简化光照
 - [x] **M4** 完整 NBT + Anvil 存档读写（世界持久化）
 - [x] **M5** 实体系统（物理、基础 AI）
-- [x] **M6** 注册表数据管线：从原版 jar 提取 blocks/items/recipes 自动生成 Go 代码（当前）
-- [ ] **M7** 背包 / 合成 / 命令系统（Brigadier 移植）/ 红石
+- [x] **M6** 注册表数据管线：从原版 jar 提取 blocks/items/recipes 自动生成 Go 代码
+- [x] **M7** 背包 / 合成 / 命令系统（Brigadier 移植）/ 基础红石（当前）
 - [ ] **P**  Paper / Purpur 行为差异复刻
 
 ## 🧑‍💻 开发
