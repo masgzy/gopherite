@@ -23,19 +23,26 @@ type beKind int
 const (
 	beChest beKind = iota
 	beFurnace
+	beBrewing
 )
 
 // vanilla block entity ids for the NBT round-trip.
 func (k beKind) id() string {
-	if k == beFurnace {
+	switch k {
+	case beFurnace:
 		return "minecraft:furnace"
+	case beBrewing:
+		return "minecraft:brewing_stand"
 	}
 	return "minecraft:chest"
 }
 
 func (k beKind) slots() int {
-	if k == beFurnace {
+	switch k {
+	case beFurnace:
 		return 3 // ingredient, fuel, result (AbstractFurnaceBlockEntity)
+	case beBrewing:
+		return 5 // 0-2 potions, 3 ingredient, 4 fuel (BrewingStandBlockEntity)
 	}
 	return 27 // 3x9 chest grid (RandomizableContainer)
 }
@@ -54,6 +61,10 @@ type blockEntity struct {
 	litTotalTime     int
 	cookingTimer     int
 	cookingTotalTime int
+
+	// M13 brewing stand state (vanilla BrewingStandBlockEntity fields).
+	brewTime int32 // 0..400 递减
+	fuel     int32 // 剩余可操作次数（一柱烈焰粉 = 20）
 
 	// lastIngredient tracks the ingredient item between tick visits so a
 	// same-item top-up does not reset the cook progress (vanilla setItem
@@ -104,7 +115,14 @@ func (s *Server) ensureBlockEntity(kind beKind, x, y, z int) *blockEntity {
 func (s *Server) removeBlockEntity(b *blockEntity) {
 	for _, st := range b.slots {
 		if st.count > 0 {
-			s.spawnEntityLocked(newItemEntity(s.allocEntityID(), float64(b.x)+0.5, float64(b.y)+0.4, float64(b.z)+0.5, st.item, st.count))
+			var e entity
+			if st.potion > 0 {
+				// M13: 药水掉落保留 potion_contents 组件。
+				e = newItemEntityWithPotion(s.allocEntityID(), float64(b.x)+0.5, float64(b.y)+0.4, float64(b.z)+0.5, st.item, st.count, st.potion)
+			} else {
+				e = newItemEntity(s.allocEntityID(), float64(b.x)+0.5, float64(b.y)+0.4, float64(b.z)+0.5, st.item, st.count)
+			}
+			s.spawnEntityLocked(e)
 		}
 	}
 	delete(s.blockEnts, b.posKey())
@@ -240,13 +258,16 @@ const (
 // burnCoolSpeed is vanilla's cooldown per tick when unlit (2/tick).
 const burnCoolSpeed = 2
 
-// tickBlockEntities advances every furnace once. Runs on the ticker with
-// Server.mu held by tickOnce — the whole loop is locked work, mirroring
-// AbstractFurnaceBlockEntity.serverTick.
+// tickBlockEntities advances every furnace/brewing stand once. Runs on
+// the ticker with Server.mu held by tickOnce — the whole loop is locked
+// work, mirroring the vanilla serverTick methods.
 func (s *Server) tickBlockEntities() {
 	for _, b := range s.blockEnts {
-		if b.kind == beFurnace {
+		switch b.kind {
+		case beFurnace:
 			s.tickFurnaceLocked(b)
+		case beBrewing:
+			s.tickBrewingLocked(b)
 		}
 	}
 }

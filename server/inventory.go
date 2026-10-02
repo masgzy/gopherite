@@ -188,6 +188,12 @@ func (c *conn) placeBlock(u java.ServerboundUseItemOn) {
 			c.openFurnace(b)
 			c.s.mu.Unlock()
 			return
+		case "minecraft:brewing_stand":
+			c.s.mu.Lock()
+			b := c.s.ensureBlockEntity(beBrewing, int(u.X), int(u.Y), int(u.Z))
+			c.openBrewing(b)
+			c.s.mu.Unlock()
+			return
 		case "minecraft:lever":
 			c.s.mu.Lock()
 			c.s.toggleLever(int(u.X), int(u.Y), int(u.Z))
@@ -230,7 +236,7 @@ func (c *conn) placeBlock(u java.ServerboundUseItemOn) {
 	}
 	// Containers face the player; vanilla property sets must match
 	// exactly for the state lookup.
-	isContainer := block == "minecraft:chest" || block == "minecraft:furnace"
+	isContainer := block == "minecraft:chest" || block == "minecraft:furnace" || block == "minecraft:brewing_stand"
 	if isContainer {
 		props := blockPropsOf(state)
 		props["facing"] = facingFromYaw(p.yaw)
@@ -254,9 +260,12 @@ func (c *conn) placeBlock(u java.ServerboundUseItemOn) {
 	}
 	if isContainer {
 		c.s.mu.Lock()
-		if block == "minecraft:chest" {
+		switch block {
+		case "minecraft:chest":
 			c.s.ensureBlockEntity(beChest, x, y, z)
-		} else {
+		case "minecraft:brewing_stand":
+			c.s.ensureBlockEntity(beBrewing, x, y, z)
+		default:
 			c.s.ensureBlockEntity(beFurnace, x, y, z)
 		}
 		c.s.mu.Unlock()

@@ -42,6 +42,7 @@ type itemEntity struct {
 
 	itemID int32 // vanilla item registry index
 	count  int32
+	potion int32 // M13: potion_contents id+1; 0 = none (stacks of 1 only)
 
 	age         int32 // ticks lived; despawn at 6000
 	pickupDelay int32 // ticks before players can collect
@@ -84,6 +85,14 @@ func newItemEntity(id int32, x, y, z float64, itemID, count int32) *itemEntity {
 		count:       count,
 		pickupDelay: 10,
 	}
+}
+
+// newItemEntityWithPotion mints a dropped stack carrying the M13
+// potion_contents component (potion id+1, 0 = none).
+func newItemEntityWithPotion(id int32, x, y, z float64, itemID, count, potion int32) *itemEntity {
+	e := newItemEntity(id, x, y, z, itemID, count)
+	e.potion = potion
+	return e
 }
 
 func (e *itemEntity) entityID() int32 { return e.id }
@@ -207,6 +216,31 @@ func (e *itemEntity) tryPickup(s *Server) {
 	}
 	if taker == nil {
 		s.mu.Unlock()
+		return
+	}
+	if e.potion > 0 {
+		// M13: 药水不掉叠、不合并，必须整组进入一个空槽，否则留在地上。
+		if e.count > itemMaxStack {
+			s.mu.Unlock()
+			return
+		}
+		placed := false
+		for i := range taker.slots {
+			if taker.slots[i].count == 0 {
+				taker.slots[i] = invSlot{item: e.itemID, count: e.count, potion: e.potion}
+				taker.conn.sendSlot(int32(i), taker.slots[i])
+				placed = true
+				break
+			}
+		}
+		s.mu.Unlock()
+		if !placed {
+			return // inventory full: leave the item
+		}
+		taken := e.count
+		e.count = 0
+		e.dead = true
+		taker.conn.sendTakeItem(e.id, taker.id, taken)
 		return
 	}
 	remaining := taker.giveItem(e.itemID, e.count)
@@ -435,7 +469,7 @@ func (s *Server) encodeSpawn(w *protocol.Writer, e entity) {
 func (s *Server) encodeMetadata(w *protocol.Writer, e entity) {
 	if it, ok := e.(*itemEntity); ok {
 		w.VarInt(v776.PacketPlaySetEntityData)
-		java.WriteSetEntityDataItem(w, it.id, it.itemID, it.count)
+		java.WriteSetEntityDataItem(w, it.id, it.itemID, it.count, it.potion)
 	}
 	if m, ok := e.(*mobEntity); ok {
 		writeMobMetadata(w, m)

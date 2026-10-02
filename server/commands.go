@@ -28,6 +28,7 @@ const (
 	pItemStack = java.ParserItemStack
 	pGamemode  = java.ParserGamemode
 	pTime      = java.ParserTime
+	pBool      = java.ParserBool
 )
 
 // registerCommands wires the full tree.
@@ -67,6 +68,31 @@ func registerCommands(root *cmdNode) {
 	root.add(literalf("setblock").add(
 		argf("pos", "minecraft:block_pos", pBlockPos, "pos").add(
 			argf("block", "minecraft:block_state", pBlockSt, "block").setExec(cmdSetBlock))))
+
+	// M13: /effect give <target> <effect> [seconds] [amplifier] [hideParticles]
+	//      /effect clear [target]
+	effect := literalf("effect")
+	effectClear := literalf("clear")
+	effectClear.setExec(cmdEffectClear)
+	effectClearTarget := argf("target", "minecraft:entity", pEntity, "target")
+	effectClearTarget.setExec(cmdEffectClear)
+	effectClear.add(effectClearTarget)
+	effect.add(effectClear)
+	effectGive := literalf("give")
+	effectGiveTarget := argf("target", "minecraft:entity", pEntity, "target")
+	effArg := argf("effect", "brigadier:string", pString, "effect")
+	effArg.exec = true
+	effArg.run = cmdEffectGive
+	effSec := argf("seconds", "brigadier:integer", pInteger, "seconds").setExec(cmdEffectGive)
+	effAmp := argf("amplifier", "brigadier:integer", pInteger, "amplifier").setExec(cmdEffectGive)
+	effHide := argf("hideParticles", "brigadier:bool", pBool, "hideParticles").setExec(cmdEffectGive)
+	effArg.add(effSec)
+	effSec.add(effAmp)
+	effAmp.add(effHide)
+	effectGiveTarget.add(effArg)
+	effectGive.add(effectGiveTarget)
+	effect.add(effectGive)
+	root.add(effect)
 }
 
 // setExec marks a node runnable.
@@ -349,4 +375,62 @@ func cmdSetBlock(c *conn, args map[string]string) error {
 	c.s.mu.Unlock()
 	log.Printf(ui.Success("OK ")+"%s setblock %s (%d, %d, %d)", c.username, block, int(x), int(y), int(z))
 	return c.sendSystemChat(fmt.Sprintf("§7已设置 §f%s §7(%d, %d, %d)", block, int(x), int(y), int(z)))
+}
+
+// cmdEffectGive applies a status effect: /effect give <target> <effect>
+// [seconds] [amplifier] [hideParticles]. Seconds default 30 (vanilla
+// 1080000s for infinite is not modelled); amplifier is 0-based.
+func cmdEffectGive(c *conn, args map[string]string) error {
+	targets := resolveTargets(c.s, c.player, args["target"])
+	if len(targets) == 0 {
+		return c.sendSystemChat("§c没有找到玩家: " + args["target"])
+	}
+	name := strings.TrimPrefix(stripStateSuffix(args["effect"]), "minecraft:")
+	effID, ok := effectIDByName(name)
+	if !ok {
+		return c.sendSystemChat("§c未知效果: " + args["effect"])
+	}
+	seconds := int32(30)
+	if v, ok := args["seconds"]; ok {
+		if n, err := strconv.ParseInt(v, 10, 32); err == nil && n > 0 {
+			seconds = int32(n)
+		}
+	}
+	amp := int32(0)
+	if v, ok := args["amplifier"]; ok {
+		if n, err := strconv.ParseInt(v, 10, 32); err == nil && n >= 0 && n < 255 {
+			amp = int32(n)
+		}
+	}
+	hide := false
+	if v, ok := args["hideParticles"]; ok {
+		hide = v == "true" || v == "1"
+	}
+	c.s.mu.Lock()
+	defer c.s.mu.Unlock()
+	for _, t := range targets {
+		if t.dead || t.gameMode != 0 {
+			continue
+		}
+		c.s.applyPlayerEffectLocked(t, effID, amp, seconds*20, hide, !hide, true)
+	}
+	return nil
+}
+
+// cmdEffectClear drops every active effect: /effect clear [target].
+func cmdEffectClear(c *conn, args map[string]string) error {
+	target := args["target"]
+	if target == "" {
+		target = "@s"
+	}
+	targets := resolveTargets(c.s, c.player, target)
+	if len(targets) == 0 {
+		return c.sendSystemChat("§c没有找到玩家: " + target)
+	}
+	c.s.mu.Lock()
+	defer c.s.mu.Unlock()
+	for _, t := range targets {
+		c.s.clearPlayerEffectsLocked(t)
+	}
+	return nil
 }

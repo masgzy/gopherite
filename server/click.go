@@ -151,10 +151,16 @@ func (m *menu) doPickup(p *player, c *conn, slot, button int) {
 	}
 	clicked := m.get(p, slot)
 	carried := m.carried
+	if m.kind == menuBrewing && clicked.count <= 0 && carried.count > 0 && !m.slotAcceptsBrewing(slot, carried) {
+		return // 酿造台槽位不接受手中的物品
+	}
 
 	// Result slot: crafting take (vanilla ResultSlot behaviour); the
 	// furnace result was already produced by the block tick, so taking it
 	// consumes nothing.
+	if m.kind == menuBrewing && !m.slotAcceptsBrewing(slot, carried) && clicked.count <= 0 {
+		return // 酿造台槽位不接受手中的物品（vanilla mayPlace）
+	}
 	if m.isResultSlot(slot) {
 		if clicked.count <= 0 || carried.count > 0 && carried.item != clicked.item {
 			return
@@ -194,7 +200,7 @@ func (m *menu) doPickup(p *player, c *conn, slot, button int) {
 		if !primary {
 			amount = (clicked.count + 1) / 2
 		}
-		taken := invSlot{item: clicked.item, count: amount}
+		taken := invSlot{item: clicked.item, count: amount, potion: clicked.potion}
 		clicked.count -= amount
 		m.set(p, slot, clicked)
 		m.carried = taken
@@ -202,7 +208,7 @@ func (m *menu) doPickup(p *player, c *conn, slot, button int) {
 	case clicked.item == carried.item:
 		if primary {
 			// Merge carried into the slot.
-			room := itemMaxStack - clicked.count
+			room := maxStackOf(clicked.item) - clicked.count
 			move := carried.count
 			if move > room {
 				move = room
@@ -214,7 +220,7 @@ func (m *menu) doPickup(p *player, c *conn, slot, button int) {
 		} else {
 			// Move one from carried to slot (vanilla places one even at
 			// full? vanilla inserts one; room is required).
-			if clicked.count < itemMaxStack {
+			if clicked.count < maxStackOf(clicked.item) {
 				clicked.count++
 				carried.count--
 				m.set(p, slot, clicked)
@@ -224,7 +230,8 @@ func (m *menu) doPickup(p *player, c *conn, slot, button int) {
 		m.afterSlotChange(p, slot)
 	default:
 		// Different items: swap when the slot accepts the carried stack.
-		if carried.count <= itemMaxStack {
+		if carried.count <= maxStackOf(carried.item) &&
+			!(m.kind == menuBrewing && !m.slotAcceptsBrewing(slot, carried)) {
 			m.set(p, slot, carried)
 			m.carried = clicked
 			m.afterSlotChange(p, slot)
@@ -240,14 +247,14 @@ func insertStack(m *menu, p *player, i int, s invSlot, amount int32) invSlot {
 		if amount > s.count {
 			amount = s.count
 		}
-		m.set(p, i, invSlot{item: s.item, count: amount})
+		m.set(p, i, invSlot{item: s.item, count: amount, potion: s.potion})
 		s.count -= amount
 		return s
 	}
 	if target.item != s.item {
 		return s
 	}
-	room := itemMaxStack - target.count
+	room := maxStackOf(target.item) - target.count
 	if amount > room {
 		amount = room
 	}
@@ -348,6 +355,14 @@ func (m *menu) quickMove(p *player, slot int, s invSlot) invSlot {
 		default: // inventory -> chest grid
 			return m.moveRange(p, s, 0, 27, false)
 		}
+	case menuBrewing:
+		switch {
+		case slot < 5: // brewing slots -> inventory
+			return m.moveRange(p, s, 5, 41, false)
+		default: // inventory: blaze powder -> fuel, ingredients -> slot 3,
+			// potions/bottles -> bottle slots, else move around the inv
+			return m.quickMoveBrewingInv(p, slot, s)
+		}
 	case menuFurnace:
 		switch {
 		case slot == 2: // result -> inventory
@@ -418,7 +433,7 @@ func (m *menu) moveRange(p *player, s invSlot, lo, hi int, reverse bool) invSlot
 			if place > itemMaxStack {
 				place = itemMaxStack
 			}
-			m.set(p, i, invSlot{item: s.item, count: place})
+			m.set(p, i, invSlot{item: s.item, count: place, potion: s.potion})
 			s.count -= place
 			if s.count == 0 {
 				return s
@@ -533,7 +548,7 @@ func (m *menu) doQuickCraft(p *player, c *conn, slot, button int) {
 					if per > left {
 						per = left
 					}
-					m.set(p, i, invSlot{item: m.carried.item, count: per})
+					m.set(p, i, invSlot{item: m.carried.item, count: per, potion: m.carried.potion})
 					left -= per
 				} else if t.item == m.carried.item {
 					room := itemMaxStack - t.count
@@ -566,4 +581,41 @@ func (m *menu) resetDrag() {
 	m.dragStatus = 0
 	m.dragType = 0
 	m.dragSlots = nil
+}
+
+// slotAcceptsBrewing mirrors the vanilla BrewingStandMenu slot rules:
+// 0-2 take one potion/splash/lingering/glass bottle, 3 takes any brewing
+// ingredient, 4 takes blaze powder.
+func (m *menu) slotAcceptsBrewing(slot int, s invSlot) bool {
+	switch {
+	case slot >= 0 && slot < 3:
+		if s.count > 1 {
+			return false
+		}
+		if s.potion > 0 {
+			name := itemNameOf(s.item)
+			return name == "minecraft:potion" || name == "minecraft:splash_potion" ||
+				name == "minecraft:lingering_potion"
+		}
+		return itemNameOf(s.item) == "minecraft:glass_bottle"
+	case slot == 3:
+		return brewingIsIngredient(s.item)
+	case slot == 4:
+		return itemNameOf(s.item) == "minecraft:blaze_powder"
+	}
+	return true
+}
+
+// quickMoveBrewingInv routes shift-clicks from the inventory into the
+// brewing slots (fuel first, then ingredients, then bottles).
+func (m *menu) quickMoveBrewingInv(p *player, slot int, s invSlot) invSlot {
+	switch {
+	case itemNameOf(s.item) == "minecraft:blaze_powder":
+		return m.moveRange(p, s, 4, 5, false)
+	case brewingIsIngredient(s.item):
+		return m.moveRange(p, s, 3, 4, false)
+	case m.slotAcceptsBrewing(0, s):
+		return m.moveRange(p, s, 0, 3, false)
+	}
+	return m.moveRange(p, s, 5, 41, false)
 }

@@ -173,6 +173,16 @@ const (
 	PacketPlaySetExperience    = 0x67
 	PacketPlaySetHealth        = 0x68
 	PacketPlayUpdateAttributes = 0x83
+
+	// M13: mob effects + thrown potions (clientbound).
+	PacketPlayRemoveMobEffect = 0x4E
+	PacketPlayUpdateMobEffect = 0x84
+)
+
+// M13 entity type ids (EntityTypeIds.class registry order, 26.2).
+const (
+	EntityTypeSplashPotion    = 105 // minecraft:splash_potion
+	EntityTypeLingeringPotion = 106 // minecraft:lingering_potion
 )
 
 // M8 serverbound combat/input packets.
@@ -228,6 +238,11 @@ const (
 	DamageTypeMobAttack = 28 // minecraft:mob_attack
 	DamageTypeInFire    = 21 // minecraft:in_fire
 	DamageTypeOnFire    = 31 // minecraft:on_fire
+	// M13 status effects.
+	DamageTypeHotFloor      = 20 // minecraft:hot_floor
+	DamageTypeIndirectMagic = 23 // minecraft:indirect_magic
+	DamageTypeMagic         = 27 // minecraft:magic
+	DamageTypeWither        = 49 // minecraft:wither
 )
 
 // SoundSource enum ordinals (net.minecraft.sounds.SoundSource order).

@@ -181,7 +181,10 @@ func (s *Server) advanceMining(p *player) error {
 		return nil
 	}
 	h := hardnessOf(m.state)
-	per := miningPerTick(1.0, p.onGround, h)
+	// M13: 急迫加速（+20%/级）、挖掘疲劳减速（×0.3/级），
+	// 对应 vanilla getDigSpeed 的效果乘区。
+	speed := 1.0 * miningSpeedFactor(&p.effectTarget)
+	per := miningPerTick(speed, p.onGround, h)
 	m.damage += per
 	stage := int8(m.damage * 10)
 	if stage > 9 {

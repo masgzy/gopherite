@@ -164,6 +164,14 @@ func nbtBlockEntity(b *blockEntity) *java.NbtComp {
 			Set("slot", java.NbtByte(int64(i))).
 			Set("id", java.NbtString(itemNameOf(s.item))).
 			Set("count", java.NbtInt(int64(s.count)))
+		if s.potion > 0 {
+			// M13: 保存 potion_contents 组件（vanilla 组件 NBT 键）。
+			comp := java.NewNbtComp().
+				Set("potion", java.NbtString(potionDefs[s.potion-1].name))
+			components := java.NewNbtComp().
+				Set("minecraft:potion_contents", java.NbtAny{Type: java.TagCompound, Comp: comp})
+			entry.Set("components", java.NbtAny{Type: java.TagCompound, Comp: components})
+		}
 		items = append(items, java.NbtAny{Type: java.TagCompound, Comp: entry})
 	}
 	root.Set("Items", java.NbtListOf(java.TagCompound, items))
@@ -172,6 +180,10 @@ func nbtBlockEntity(b *blockEntity) *java.NbtComp {
 			Set("cooking_total_time", java.NbtShort(int64(b.cookingTotalTime))).
 			Set("lit_time_remaining", java.NbtShort(int64(b.litTimeRemaining))).
 			Set("lit_total_time", java.NbtShort(int64(b.litTotalTime)))
+	}
+	if b.kind == beBrewing {
+		root.Set("BrewTime", java.NbtInt(int64(b.brewTime))).
+			Set("Fuel", java.NbtInt(int64(b.fuel)))
 	}
 	return root
 }
@@ -186,6 +198,8 @@ func blockEntityFromNBT(comp *java.NbtComp) *blockEntity {
 		kind = beChest
 	case "minecraft:furnace":
 		kind = beFurnace
+	case "minecraft:brewing_stand":
+		kind = beBrewing
 	default:
 		return nil
 	}
@@ -199,21 +213,34 @@ func blockEntityFromNBT(comp *java.NbtComp) *blockEntity {
 		if entry == nil {
 			continue
 		}
-		slot := int(entry.Get("slot").Num)
-		if slot < 0 || slot >= len(b.slots) {
+		slotIdx := int(entry.Get("slot").Num)
+		if slotIdx < 0 || slotIdx >= len(b.slots) {
 			continue
 		}
 		itemID, ok := itemIDByName[entry.Get("id").Str]
 		if !ok {
 			continue
 		}
-		b.slots[slot] = invSlot{item: itemID, count: int32(entry.Get("count").Num)}
+		st := invSlot{item: itemID, count: int32(entry.Get("count").Num)}
+		// M13: 读取 potion_contents 组件（vanilla components 键）。
+		if comps := entry.Get("components").Comp; comps != nil {
+			if pc := comps.Get("minecraft:potion_contents").Comp; pc != nil {
+				if pid, ok2 := potionIDByName(pc.Get("potion").Str); ok2 {
+					st.potion = pid + 1
+				}
+			}
+		}
+		b.slots[slotIdx] = st
 	}
 	if kind == beFurnace {
 		b.cookingTimer = int(comp.Get("cooking_time_spent").Num)
 		b.cookingTotalTime = int(comp.Get("cooking_total_time").Num)
 		b.litTimeRemaining = int(comp.Get("lit_time_remaining").Num)
 		b.litTotalTime = int(comp.Get("lit_total_time").Num)
+	}
+	if kind == beBrewing {
+		b.brewTime = int32(comp.Get("BrewTime").Num)
+		b.fuel = int32(comp.Get("Fuel").Num)
 	}
 	return b
 }

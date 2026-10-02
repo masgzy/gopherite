@@ -31,12 +31,15 @@ const (
 	menuCrafting
 	menuChest
 	menuFurnace
+	menuBrewing
 )
 
-// menuTypeIDs are the vanilla menu registry ids (MenuType register order).
+// menuTypeIDs are the vanilla menu registry ids (MenuType register order,
+// 26.2 MenuType.java：crafter_3x3 在 7，furnace = 14）。
 const (
-	menuTypeChest9x3 = 2
-	menuTypeFurnace  = 14
+	menuTypeChest9x3     = 2
+	menuTypeBrewingStand = 11
+	menuTypeFurnace      = 14
 )
 
 // menu is the server-side state of one open container.
@@ -77,12 +80,18 @@ func newFurnaceMenu(id int32, b *blockEntity) *menu {
 	return &menu{kind: menuFurnace, id: id, be: b}
 }
 
+func newBrewingMenu(id int32, b *blockEntity) *menu {
+	return &menu{kind: menuBrewing, id: id, be: b}
+}
+
 func (m *menu) slotCount() int {
 	switch m.kind {
 	case menuChest:
 		return 63
 	case menuFurnace:
 		return 39
+	case menuBrewing:
+		return 41 // 5 brewing slots + 27 main + 9 hotbar
 	default:
 		return 46
 	}
@@ -96,6 +105,8 @@ func (m *menu) beSlotCount() int {
 		return 27
 	case menuFurnace:
 		return 3
+	case menuBrewing:
+		return 5
 	default:
 		return 0
 	}
@@ -108,6 +119,8 @@ func (m *menu) get(p *player, i int) invSlot {
 		case m.kind == menuChest && i >= 0 && i < n:
 			return m.be.slots[i]
 		case m.kind == menuFurnace && i >= 0 && i < n:
+			return m.be.slots[i]
+		case m.kind == menuBrewing && i >= 0 && i < n:
 			return m.be.slots[i]
 		case i >= n && i < n+27: // main inventory (inv 9..35)
 			return p.slots[i-n+9]
@@ -198,7 +211,7 @@ func (m *menu) isResultSlot(i int) bool {
 	switch m.kind {
 	case menuFurnace:
 		return i == 2
-	case menuChest:
+	case menuChest, menuBrewing:
 		return false
 	default:
 		return i == 0
@@ -207,14 +220,14 @@ func (m *menu) isResultSlot(i int) bool {
 
 // wireStack converts an invSlot into the protocol stack shape.
 func wireStack(s invSlot) java.ItemStack {
-	return java.ItemStack{ID: s.item, Count: s.count}
+	return java.ItemStack{ID: s.item, Count: s.count, Potion: s.potion}
 }
 
 func wireSlot(s java.ItemStack) invSlot {
 	if s.Count <= 0 || s.ID <= 0 {
 		return invSlot{}
 	}
-	return invSlot{item: s.ID, count: s.Count}
+	return invSlot{item: s.ID, count: s.Count, potion: s.Potion}
 }
 
 // refreshResult recomputes slot 0 from the grid after any change.
@@ -344,4 +357,37 @@ func (c *conn) closeMenu(windowID int32, notify bool) {
 	}
 	// Refresh the (always open) inventory menu to its final state.
 	p.invMenu.sendAll(c)
+}
+
+// maxStackOf returns the vanilla max stack size for one item; M13 potions
+// never stack (1), glass bottles stack in 16s, everything else 64.
+func maxStackOf(item int32) int32 {
+	switch bareItemName(item) {
+	case "potion", "splash_potion", "lingering_potion":
+		return 1
+	case "glass_bottle":
+		return 16
+	}
+	return itemMaxStack
+}
+
+// openBrewing opens the brewing stand menu and seeds the two data slots
+// (0 brewTime, 1 fuel). Caller holds Server.mu.
+func (c *conn) openBrewing(b *blockEntity) {
+	p := c.player
+	m := newBrewingMenu(p.nextWindowID, b)
+	p.nextWindowID++
+	p.openMenu = m
+	body := protocol.NewWriter()
+	body.VarInt(v776.PacketPlayOpenScreen)
+	java.WriteOpenScreen(body, m.id, menuTypeBrewingStand, "Brewing Stand") // minecraft:brewing_stand
+	_ = c.sendPacket(body.Bytes())
+	for i, v := range [2]int{int(b.brewTime), int(b.fuel)} {
+		b.lastData[i] = v
+		dbody := protocol.NewWriter()
+		dbody.VarInt(v776.PacketPlayContainerSetData)
+		java.WriteContainerSetData(dbody, m.id, int16(i), int16(v))
+		_ = c.sendPacket(dbody.Bytes())
+	}
+	m.sendAll(c)
 }

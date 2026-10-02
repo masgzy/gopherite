@@ -155,6 +155,9 @@ func (c *conn) sendPacket(body []byte) error {
 	if c.dead.Load() {
 		return errConnDead
 	}
+	if c.nc == nil {
+		return errConnDead // 单测中的无套接字 conn：静默拒绝发包
+	}
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
 	payload := body

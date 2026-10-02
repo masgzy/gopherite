@@ -222,6 +222,13 @@ func (c *conn) startPlay() error {
 	p.sendHealth()
 	p.sendExperience()
 
+	// M13: 重放已活跃的状态效果（重进服后客户端 HUD 恢复）。
+	c.s.mu.Lock()
+	for id, inst := range p.effects {
+		c.s.syncPlayerEffectLocked(p, id, inst)
+	}
+	c.s.mu.Unlock()
+
 	// Starter hotbar (per-slot inventory sync).
 	c.sendStarterInventory()
 

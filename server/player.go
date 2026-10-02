@@ -53,6 +53,11 @@ type player struct {
 	voidTicks     int32 // ticks spent below the void threshold
 	dead          bool  // death screen shown, awaiting respawn
 
+	// M13 状态效果：活跃效果表（MobEffectInstance）与吸收心，均由
+	// s.mu 保护。effectTarget 嵌入提供 effects/getEffect/hasEffect。
+	effectTarget
+	absorption float32 // 吸收心（absorption 效果提供，伤害优先扣减）
+
 	expProgress float32
 	expLevel    int32
 	expTotal    int32
@@ -60,6 +65,7 @@ type player struct {
 	// Eating state: eatTicksLeft > 0 while consuming eatingFood.
 	eatTicksLeft   int32
 	eatingFood     foodValue
+	drinkingPotion int32 // M13: 正在饮用的药水（potion id+1，0 = 无）
 	sprinting      bool
 	lastAttackTick int64 // server tick of the last melee swing
 
@@ -92,6 +98,7 @@ type player struct {
 // invSlot is one inventory cell: a vanilla item registry id and stack
 // size; item 0 / count 0 is an empty slot.
 type invSlot struct {
-	item  int32
-	count int32
+	item   int32
+	count  int32
+	potion int32 // M13: potion_contents 药水注册 ID + 1；0 = 无（invSlot{} 即无药水）
 }

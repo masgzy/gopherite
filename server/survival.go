@@ -271,12 +271,32 @@ func (s *Server) damagePlayerLocked(p *player, amount float32, dmgType int32, ca
 	if p.gameMode != 0 { // creative/adventure/spectator: no damage in M8
 		return
 	}
+	// M13: fire_resistance 免除火焰类伤害（vanilla FireImmunity 检查在
+	// damage 管线最前面）。
+	if fireResistant(&p.effectTarget) && isFireDamage(dmgType) {
+		return
+	}
 	// M11: worn armor absorbs physical hits (see armor.go for the 26.2
 	// values and the vanilla bypasses_armor list).
 	amount = reduceDamageByArmor(amount, dmgType, p)
 	if amount <= 0 {
 		// Maxed armor cannot fully negate a hit in vanilla (floor at 20%
 		// of the raw hit), but keep the guard for safety.
+		return
+	}
+	// M13: resistance 按 20%/级减伤（starve / out_of_world 例外）。
+	amount *= resistanceFactor(&p.effectTarget, dmgType)
+	if amount <= 0 {
+		return
+	}
+	// M13: 吸收心优先扣减（vanilla absorption 在护甲之后、生命之前）。
+	if p.absorption > 0 && amount > 0 {
+		absorbed := float32(math.Min(float64(p.absorption), float64(amount)))
+		p.absorption -= absorbed
+		amount -= absorbed
+	}
+	if amount <= 0 {
+		p.sendHealth()
 		return
 	}
 	p.health -= amount
@@ -322,6 +342,8 @@ func (s *Server) killPlayerLocked(p *player, message string) {
 		}
 	}
 	p.expProgress, p.expLevel, p.expTotal = 0, 0, 0
+	s.clearPlayerEffectsLocked(p) // vanilla：死亡清除全部状态效果
+	p.absorption = 0
 	_ = p.conn.sendCombatKill(p.id, message)
 	// Everyone tracking the victim sees the fall-over animation.
 	s.broadcastEntityEventToTrackers(p.id, 3, p)
@@ -435,6 +457,12 @@ func (s *Server) tickSurvival(p *player) {
 		return
 	}
 
+	// M13: 状态效果时长递减与周期结算（再生/中毒/凋零/饥饿）。
+	s.tickPlayerEffectsLocked(p)
+	if p.dead {
+		return
+	}
+
 	// Eating completes after its duration.
 	if p.eatTicksLeft > 0 {
 		p.eatTicksLeft--
@@ -490,13 +518,26 @@ func (s *Server) tickSurvival(p *player) {
 
 // --- movement-driven survival ----------------------------------------------
 
+// isFireDamage reports fire-class damage types (fire_resistance grants
+// full immunity to all of them).
+func isFireDamage(dmgType int32) bool {
+	switch dmgType {
+	case v776.DamageTypeInFire, v776.DamageTypeOnFire, v776.DamageTypeLava, v776.DamageTypeHotFloor:
+		return true
+	}
+	return false
+}
+
 // moveFallDamageLocked accumulates fall distance from a movement packet
 // and applies the landing hit. Called from the connection goroutine with
 // s.mu already held (movement state and the ticker share these fields).
 func (s *Server) moveFallDamageLocked(p *player, prevY, newY float64, onGround bool) {
+	noDmg, safeBonus := fallDamageOverride(&p.effectTarget)
 	if onGround {
-		if p.fallDistance > fallSafeDistance {
-			dmg := float32(math.Floor(float64(p.fallDistance - fallSafeDistance)))
+		// M13: jump_boost 提升 1 格/级的安全摔落高度。
+		safe := fallSafeDistance + float32(safeBonus)
+		if !noDmg && p.fallDistance > safe {
+			dmg := float32(math.Floor(float64(p.fallDistance - safe)))
 			if dmg > 0 {
 				s.damagePlayerLocked(p, dmg, v776.DamageTypeFall, -1, -1)
 			}
@@ -529,19 +570,37 @@ func (c *conn) useItemStart(hand int32) {
 	s := c.s
 	s.mu.Lock()
 	heldBow := false
+	var throwPotion invSlot
+	var thrower *player
 	if p := c.player; p != nil && !p.dead {
-		heldBow = p.slots[p.heldSlot].item == itemIDByName[bowItemName]
+		held := p.slots[p.heldSlot]
+		switch {
+		case held.item == itemIDByName[bowItemName]:
+			heldBow = true
+		case held.item == itemIDByName["minecraft:splash_potion"],
+			held.item == itemIDByName["minecraft:lingering_potion"]:
+			// M13: 喷溅/滞留药水右键即掷（不蓄力，vanilla ThrowableItemProjectile）。
+			if held.count > 0 && p.gameMode == 0 {
+				throwPotion = held
+				thrower = p
+			}
+		}
 	}
 	s.mu.Unlock()
 	if heldBow {
 		c.startBowDraw()
 		return
 	}
+	if thrower != nil {
+		c.throwPotion(throwPotion, hand)
+		return
+	}
 	c.startEating(hand)
 }
 
 // startEating begins consuming the held item if it is food and there is
-// room for it. Called from the connection goroutine.
+// room for it. Potions are always drinkable regardless of hunger (vanilla
+// alwaysEdible). Called from the connection goroutine.
 func (c *conn) startEating(hand int32) {
 	s := c.s
 	s.mu.Lock()
@@ -550,12 +609,22 @@ func (c *conn) startEating(hand int32) {
 	if p == nil || p.dead || p.gameMode != 0 || p.eatTicksLeft > 0 {
 		return
 	}
-	if p.food >= maxFood {
+	slot := p.slots[p.heldSlot]
+	if slot.count <= 0 {
 		return
 	}
-	slot := p.slots[p.heldSlot]
 	fv, ok := foodByItem[slot.item]
-	if !ok || slot.count <= 0 {
+	if !ok {
+		// M13: 药水饮用：满饱食度也可饮用，同原版 alwaysEdible。
+		if isDrinkablePotionSlot(slot) {
+			_ = hand
+			p.eatTicksLeft = eatDurationTicks
+			p.eatingFood = foodValue{} // 药水走 finishEating 的 potion 分支
+			p.drinkingPotion = slot.potion
+		}
+		return
+	}
+	if p.food >= maxFood {
 		return
 	}
 	_ = hand // off-hand eating behaves identically in M8
@@ -563,14 +632,15 @@ func (c *conn) startEating(hand int32) {
 	p.eatingFood = fv
 }
 
-// cancelEating stops an in-progress bite or bow draw (release, hotbar
-// swap, damage). Caller holds no lock.
+// cancelEating stops an in-progress bite, drink or bow draw (release,
+// hotbar swap, damage). Caller holds no lock.
 func (c *conn) cancelEating() {
 	s := c.s
 	s.mu.Lock()
 	if p := c.player; p != nil {
 		p.eatTicksLeft = 0
 		p.usingBow = false // M11: an abort kills a draw without firing
+		p.drinkingPotion = 0
 	}
 	s.mu.Unlock()
 }
@@ -582,9 +652,29 @@ func (s *Server) finishEating(p *player) {
 	if slot.count <= 0 {
 		return
 	}
+	// M13: 药水饮用完成 —— 施加效果、返还玻璃瓶。
+	if p.drinkingPotion > 0 {
+		potionID := p.drinkingPotion - 1
+		p.drinkingPotion = 0
+		slot.count--
+		if slot.count == 0 {
+			slot = invSlot{}
+		}
+		p.slots[p.heldSlot] = slot
+		p.conn.sendSlot(p.heldSlot, slot)
+		s.applyPotionEffectsToPlayer(p, potionID, 1.0)
+		// vanilla：喝完返还一个玻璃瓶（进入背包或掉落）。
+		s.giveOrDropItemLocked(p, itemIDByName["minecraft:glass_bottle"], 1)
+		return
+	}
 	fv, ok := foodByItem[slot.item]
 	if !ok {
 		return
+	}
+	// M13: 食用附加效果需要在物品被消耗前取名称。
+	var foodName string
+	if n := itemNameOf(slot.item); n != "" {
+		foodName = n
 	}
 	slot.count--
 	if slot.count == 0 {
@@ -594,5 +684,26 @@ func (s *Server) finishEating(p *player) {
 	p.conn.sendSlot(p.heldSlot, slot)
 	p.food = int32(math.Min(float64(maxFood), float64(p.food)+float64(fv.nutrition)))
 	p.saturation = float32(math.Min(float64(p.food), float64(p.saturation+fv.saturation)))
+	// M13: 食用附加效果（金苹果/腐肉/蜘蛛眼/河豚/奶桶）。
+	if foodName != "" {
+		s.applyConsumableEffects(p, foodName)
+	}
 	p.sendHealth()
+}
+
+// giveOrDropItemLocked pushes one item into the player inventory or
+// spawns an item entity when full. Caller holds s.mu.
+func (s *Server) giveOrDropItemLocked(p *player, itemID, count int32) {
+	if itemID <= 0 || count <= 0 {
+		return
+	}
+	for i := range p.slots {
+		if p.slots[i].count == 0 {
+			p.slots[i] = invSlot{item: itemID, count: count}
+			p.conn.sendSlot(int32(i), p.slots[i])
+			return
+		}
+	}
+	e := newItemEntity(s.allocEntityID(), p.x, p.y+0.5, p.z, itemID, count)
+	s.spawnEntityLocked(e)
 }

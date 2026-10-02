@@ -625,7 +625,7 @@ func WriteSystemChat(w *protocol.Writer, text string) {
 
 // WriteSetPlayerInventory encodes the 26.2 per-slot inventory sync: slot
 // VarInt then an optional ItemStack (count VarInt; when > 0: baked item
-// holder id+1, empty component patch = two zero VarInts).
+// holder id+1, component patch).
 func WriteSetPlayerInventory(w *protocol.Writer, slot int32, itemID int32, count int32) {
 	w.VarInt(slot)
 	if count <= 0 {
@@ -645,12 +645,14 @@ func ReadSetCarriedItem(r *protocol.Reader) (int32, error) {
 
 // --- M7: containers, crafting, player input -------------------------------
 
-// ItemStack is the plain (no component overrides) stack shape shared by
-// the container packets. ID is the item registry id; ID 0 / count 0
-// encodes as an empty optional stack.
+// ItemStack is the (mostly plain) stack shape shared by the container
+// packets. ID is the item registry id; ID 0 / count 0 encodes as an empty
+// optional stack. Potion carries the M13 potion_contents component
+// (potion registry id + 1; 0 = no component).
 type ItemStack struct {
-	ID    int32
-	Count int32
+	ID     int32
+	Count  int32
+	Potion int32
 }
 
 func writeOptionalStack(w *protocol.Writer, s ItemStack) {
@@ -660,8 +662,36 @@ func writeOptionalStack(w *protocol.Writer, s ItemStack) {
 	}
 	w.VarInt(s.Count)
 	w.VarInt(s.ID + 1) // baked holder reference: registry index + 1
-	w.VarInt(0)        // component patch: no additions
-	w.VarInt(0)        // ... and no removals
+	writeComponentPatch(w, s.Potion)
+}
+
+// writeComponentPatch encodes the item-components delta lists. With
+// potion > 0 the single added component is minecraft:potion_contents
+// (network id 51 in the 26.2 DataComponents registration order,
+// verified against DataComponents.java), whose 26.2 stream payload is
+// PotionContents.STREAM_CODEC = StreamCodec.composite(
+//
+//	optional(Potion.STREAM_CODEC),   // bool + VarInt registry id
+//	optional(INT),                   // custom color: bool only
+//	list(MobEffectInstance.STREAM_CODEC), // VarInt count
+//	optional(STRING_UTF8))           // custom name: bool only
+//
+// (ByteBufCodecs.optional = 1-byte presence flag, decompiled
+// ByteBufCodecs$23). Empty potion keeps the plain two zero VarInts.
+func writeComponentPatch(w *protocol.Writer, potion int32) {
+	if potion > 0 {
+		w.VarInt(1)  // added component count
+		w.VarInt(51) // minecraft:potion_contents
+		w.Bool(true)
+		w.VarInt(potion - 1)
+		w.Bool(false) // no custom color
+		w.VarInt(0)   // no custom effects
+		w.Bool(false) // no custom name
+		w.VarInt(0)   // removed component count
+		return
+	}
+	w.VarInt(0) // component additions: none
+	w.VarInt(0) // component removals: none
 }
 
 // WriteOpenScreen opens a container window: container id VarInt, menu

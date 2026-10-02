@@ -128,6 +128,10 @@ type mobEntity struct {
 	nyaw, nhead float32
 	hasRot      bool
 	removed     bool
+
+	// M13 状态效果。与 mobEntity 其它字段一样由 m.mu 保护；周期结算由
+	// Server 在持有 s.mu 时驱动（tickAllMobEffects，锁序 s.mu → m.mu）。
+	effectTarget
 }
 
 // newMobEntity seeds a mob at (x,y,z) facing a random direction.
@@ -245,6 +249,8 @@ func (m *mobEntity) tick(s *Server) {
 
 	// Speed scales up while fleeing.
 	speed := m.def.speed
+	// M13: 速度/缓慢效果修正移速（vanilla ADD_MULTIPLIED_TOTAL）。
+	speed *= mobSpeedFactor(&m.effectTarget)
 	if m.panicTicks > 0 {
 		speed *= 1.8
 	}
@@ -443,6 +449,11 @@ func (s *Server) hurtMobTypeLocked(m *mobEntity, attacker *player, dmg float32, 
 func (s *Server) damageMobLocked(m *mobEntity, dmg float32, dmgType int32, cause, direct int32) {
 	m.mu.Lock()
 	if m.deathTicks > 0 || m.removed || dmg <= 0 {
+		m.mu.Unlock()
+		return
+	}
+	// M13: fire_resistance 免除火焰类伤害（vanilla 实体 FireImmunity）。
+	if fireResistant(&m.effectTarget) && isFireDamage(dmgType) {
 		m.mu.Unlock()
 		return
 	}
@@ -660,6 +671,11 @@ func (c *conn) handleAttack(targetID int32) error {
 		if w, ok := weaponDamage[held.item]; ok {
 			dmg = w
 		}
+	}
+	// M13: 力量 +3/级、虚弱 -4/级（vanilla ADD_VALUE 攻击伤害修正）。
+	dmg += meleeBonusFromEffects(&p.effectTarget)
+	if dmg < 0 {
+		dmg = 0
 	}
 	// M11: a falling attack is a vanilla critical hit — 1.5x damage plus
 	// the crit animation on every tracking client. (Enchantment/sneak

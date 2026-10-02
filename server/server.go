@@ -248,9 +248,14 @@ func (s *Server) tickOnce() {
 	s.tickEntities()
 
 	// M10: furnace block entities (burn, cook, lit state, progress push).
+	// M13: brewing stands + mob status effects share this locked pass.
 	s.mu.Lock()
 	s.tickBlockEntities()
+	s.tickAllMobEffects()
 	s.mu.Unlock()
+
+	// M13: resolve thrown-potion impacts (applySplashAt) + despawns.
+	s.consumePotionImpacts()
 
 	// M8: survival ticks (hunger, regen, void, eating) for every player.
 	// Snapshot under the lock: tickSurvival re-locks internally.
