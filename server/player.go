@@ -43,6 +43,26 @@ type player struct {
 	// gameMode mirrors the gamemode change game event (0 survival..).
 	gameMode int32
 
+	// M8 survival state (guarded by Server.mu like the rest of the model).
+	health        float32 // 0..20 hearts*2
+	food          int32   // 0..20
+	saturation    float32
+	exhaustion    float32
+	foodTickTimer int32 // regen/starvation accumulator
+	fallDistance  float32
+	voidTicks     int32 // ticks spent below the void threshold
+	dead          bool  // death screen shown, awaiting respawn
+
+	expProgress float32
+	expLevel    int32
+	expTotal    int32
+
+	// Eating state: eatTicksLeft > 0 while consuming eatingFood.
+	eatTicksLeft   int32
+	eatingFood     foodValue
+	sprinting      bool
+	lastAttackTick int64 // server tick of the last melee swing
+
 	// seenEnt holds the entity ids streamed to this player, guarded by
 	// Server.mu (ticker entity sync touches it).
 	seenEnt map[int32]bool

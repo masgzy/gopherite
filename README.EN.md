@@ -120,7 +120,8 @@ gopherite/
 - [x] **M4** full NBT + Anvil world persistence
 - [x] **M5** entities (physics, basic AI)
 - [x] **M6** registry pipeline: extract blocks/items/recipes from the vanilla jar and generate Go code
-- [x] **M7** inventory / crafting / commands (Brigadier port) / basic redstone (current)
+- [x] **M7** inventory / crafting / commands (Brigadier port) / basic redstone
+- [x] **M8** survival basics (health / hunger / eating / fall & void damage / death & respawn / `/kill`) + passive mobs (pig / cow / sheep / chicken: wander AI, panic on hit, knockback, death drops) (current)
 - [ ] **P**  Paper / Purpur behaviour parity
 
 ## 🧑‍💻 Development

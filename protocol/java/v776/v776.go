@@ -156,9 +156,57 @@ const (
 	PacketPlaySystemChat       = 0x79
 	PacketPlayTabList          = 0x7A
 	PacketPlayUpdateTags       = 0x86
+
+	// M8: survival + mobs (clientbound).
+	PacketPlayAnimate          = 0x02
+	PacketPlayDamageEvent      = 0x19
+	PacketPlayHurtAnimation    = 0x2A
+	PacketPlayMoveEntityPosRot = 0x36
+	PacketPlayRotateHead       = 0x53
+	PacketPlayRespawn          = 0x52
+	PacketPlayPlayerCombatKill = 0x44
+	PacketPlaySetExperience    = 0x67
+	PacketPlaySetHealth        = 0x68
+	PacketPlayUpdateAttributes = 0x83
+)
+
+// M8 serverbound combat/input packets.
+const (
+	PacketPlaySBAttack        = 0x01
+	PacketPlaySBClientCommand = 0x0C
+	PacketPlaySBInteract      = 0x1A
+	PacketPlaySBPlayerCommand = 0x2A
 )
 
 // Entity type registry ids (protocol_id from reports/registries.json).
 const (
-	EntityTypeItem = 71 // minecraft:item
+	EntityTypeItem    = 71  // minecraft:item
+	EntityTypeChicken = 26  // minecraft:chicken
+	EntityTypeCow     = 30  // minecraft:cow
+	EntityTypePig     = 100 // minecraft:pig
+	EntityTypeSheep   = 111 // minecraft:sheep
+)
+
+// Attribute registry ids (protocol_id from reports/registries.json).
+const (
+	AttributeKnockbackResistance = 20 // minecraft:knockback_resistance
+	AttributeMaxHealth           = 23 // minecraft:max_health
+	AttributeMovementSpeed       = 26 // minecraft:movement_speed
+)
+
+// Damage type registry ids. The damage_type registry is data-driven: the
+// network id is the alphabetical position of data/minecraft/damage_type/
+// <name>.json in the vanilla datapack (see gen_registries.py: sorted path
+// = network id order).
+const (
+	DamageTypeDrown       = 6  // minecraft:drown
+	DamageTypeFall        = 10 // minecraft:fall
+	DamageTypeFreeze      = 17 // minecraft:freeze
+	DamageTypeGeneric     = 18 // minecraft:generic
+	DamageTypeGenericKill = 19 // minecraft:generic_kill
+	DamageTypeInWall      = 22 // minecraft:in_wall
+	DamageTypeLava        = 24 // minecraft:lava
+	DamageTypeOutOfWorld  = 32 // minecraft:out_of_world
+	DamageTypePlayerAtk   = 34 // minecraft:player_attack
+	DamageTypeStarve      = 40 // minecraft:starve
 )

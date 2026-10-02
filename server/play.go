@@ -42,6 +42,42 @@ func (c *conn) handlePlay() error {
 		return err
 	case v776.PacketPlayPlayerAction:
 		return c.handlePlayerAction()
+	case v776.PacketPlaySBAttack:
+		targetID, err := java.ReadAttack(c.rd)
+		if err != nil {
+			return err
+		}
+		return c.handleAttack(targetID)
+	case v776.PacketPlaySBInteract:
+		// Right-click on an entity: consumed to keep the stream aligned;
+		// entity interactions (breeding, riding) arrive with containers.
+		_, _, _, err := java.ReadInteract(c.rd)
+		return err
+	case v776.PacketPlaySBClientCommand:
+		return c.handleClientCommand()
+	case v776.PacketPlaySBPlayerCommand:
+		_, action, _, err := java.ReadPlayerCommand(c.rd)
+		if err != nil {
+			return err
+		}
+		if p := c.player; p != nil {
+			c.s.mu.Lock()
+			switch action {
+			case java.PlayerCommandStartSprinting:
+				p.sprinting = true
+			case java.PlayerCommandStopSprinting:
+				p.sprinting = false
+			}
+			c.s.mu.Unlock()
+		}
+		return nil
+	case v776.PacketPlayUseItem:
+		hand, _, _, _, err := java.ReadUseItem(c.rd)
+		if err != nil {
+			return err
+		}
+		c.startEating(hand)
+		return nil
 	case v776.PacketPlayUseItemOn:
 		return c.handleUseItemOn()
 	case v776.PacketPlaySBChatCommand:
@@ -80,7 +116,7 @@ func (c *conn) startPlay() error {
 		name:     c.username,
 		id:       c.s.allocEntityID(),
 		x:        0.5,
-		y:        -60,
+		y:        float64(c.s.surfaceY(0, 0)),
 		z:        0.5,
 		yaw:      0,
 		pitch:    0,
@@ -91,6 +127,11 @@ func (c *conn) startPlay() error {
 		barUUID:  newBarUUID(),
 
 		invMenu: newInventoryMenu(),
+
+		// Survival baseline: full vitals on first spawn.
+		health:     maxHealth,
+		food:       maxFood,
+		saturation: startingSaturation,
 	}
 	c.player = p
 	c.s.addPlayer(p)
@@ -155,6 +196,13 @@ func (c *conn) startPlay() error {
 	if err := c.sendPacket(c.wr.Bytes()); err != nil {
 		return err
 	}
+
+	// Survival baseline (vanilla placeNewPlayer): attributes, vitals, XP.
+	if err := c.sendAttributes(p.id, maxHealth); err != nil {
+		return err
+	}
+	p.sendHealth()
+	p.sendExperience()
 
 	// Starter hotbar (per-slot inventory sync).
 	c.sendStarterInventory()
@@ -258,6 +306,7 @@ func (c *conn) handleMove(packetID int32) error {
 		return nil
 	}
 	moved := false
+	prevX, prevY, prevZ := p.x, p.y, p.z
 	if move.HasPos {
 		p.x, p.y, p.z = move.X, move.Y, move.Z
 		if ncx := chunkCoord(p.x); ncx != p.cx {
@@ -268,6 +317,10 @@ func (c *conn) handleMove(packetID int32) error {
 			p.cz = ncz
 			moved = true
 		}
+		// M8 survival: landing damage + movement exhaustion. Fall distance
+		// accumulates for every gamemode but only survival pays.
+		c.s.moveFallDamage(p, prevY, move.Y, move.OnGround)
+		p.moveExhaustion(move.X-prevX, move.Z-prevZ)
 	}
 	// Every move variant (including status-only) carries the ground flag;
 	// mining speed depends on it.

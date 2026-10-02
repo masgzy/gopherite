@@ -264,7 +264,9 @@ func (s *Server) encodeSpawn(w *protocol.Writer, e entity) {
 	case *itemEntity:
 		// data=1 mirrors vanilla's item spawn hint; zero initial velocity
 		// since trackers receive the true motion through move packets.
-		java.WriteAddEntity(w, it.id, it.uuid, it.typeID(), it.x, it.y, it.z, 0, 0, 0, 1, 0, 0, 0)
+		java.WriteAddEntity(w, it.id, it.uuid, it.typeID(), it.x, it.y, it.z, 0, 0, 0, 0, 0, 0, 1)
+	case *mobEntity:
+		encodeMobSpawn(w, it)
 	default:
 		// future types plug in here
 		java.WriteAddEntity(w, e.entityID(), [16]byte{}, e.typeID(), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)

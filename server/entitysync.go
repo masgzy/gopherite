@@ -62,6 +62,8 @@ func (s *Server) syncEntities() {
 		hadPrev             bool
 		meta                bool
 		moved               bool
+		prevYaw, prevHead   float32
+		hadRot              bool
 	}
 	works := make([]work, 0, len(s.entities))
 	for _, e := range s.entities {
@@ -71,7 +73,14 @@ func (s *Server) syncEntities() {
 		px, py, pz, ok := e.netPos()
 		x, y, z := e.xPos()
 		moved := ok && (px != x || py != y || pz != z)
-		works = append(works, work{e: e, prevX: px, prevY: py, prevZ: pz, hadPrev: ok, meta: e.metadataDirty(), moved: moved})
+		w := work{e: e, prevX: px, prevY: py, prevZ: pz, hadPrev: ok, meta: e.metadataDirty(), moved: moved}
+		// Rotation baseline for mobs: capture before freezing the new one.
+		if ro, isRot := e.(rotator); isRot {
+			w.prevYaw, w.prevHead, w.hadRot = ro.netRot()
+			cy, ch := ro.curRot()
+			ro.setNetRot(cy, ch)
+		}
+		works = append(works, w)
 		e.clearMetadataDirty()
 		// Freeze the broadcast baseline AFTER capturing the previous one,
 		// so the move delta below is computed against the right origin.
@@ -87,15 +96,56 @@ func (s *Server) syncEntities() {
 		e := w.e
 		ex, ey, ez := e.xPos()
 
-		// Move deltas to existing trackers.
+		// Move deltas to existing trackers. Mobs carry their body yaw along
+		// (pos_rot) plus a head-yaw update when it changed; items keep the
+		// cheaper pos-only delta.
 		if w.hadPrev && w.moved {
-			body := protocol.NewWriter()
-			body.VarInt(v776.PacketPlayMoveEntityPos)
-			java.WriteMoveEntityPos(body, e.entityID(),
-				shortDelta(ex-w.prevX), shortDelta(ey-w.prevY), shortDelta(ez-w.prevZ), e.onGroundFlag())
-			for _, p := range players {
-				if p.seenEnt[e.entityID()] {
-					_ = p.conn.sendPacket(body.Bytes())
+			if ro, isRot := e.(rotator); isRot {
+				yaw, head := ro.curRot()
+				body := protocol.NewWriter()
+				body.VarInt(v776.PacketPlayMoveEntityPosRot)
+				java.WriteMoveEntityPosRot(body, e.entityID(),
+					shortDelta(ex-w.prevX), shortDelta(ey-w.prevY), shortDelta(ez-w.prevZ),
+					angleByte(yaw), 0, e.onGroundFlag())
+				for _, p := range players {
+					if p.seenEnt[e.entityID()] {
+						_ = p.conn.sendPacket(body.Bytes())
+					}
+				}
+				if angleByte(head) != angleByte(w.prevHead) {
+					headBody := protocol.NewWriter()
+					headBody.VarInt(v776.PacketPlayRotateHead)
+					java.WriteRotateHead(headBody, e.entityID(), angleByte(head))
+					for _, p := range players {
+						if p.seenEnt[e.entityID()] {
+							_ = p.conn.sendPacket(headBody.Bytes())
+						}
+					}
+				}
+			} else {
+				body := protocol.NewWriter()
+				body.VarInt(v776.PacketPlayMoveEntityPos)
+				java.WriteMoveEntityPos(body, e.entityID(),
+					shortDelta(ex-w.prevX), shortDelta(ey-w.prevY), shortDelta(ez-w.prevZ), e.onGroundFlag())
+				for _, p := range players {
+					if p.seenEnt[e.entityID()] {
+						_ = p.conn.sendPacket(body.Bytes())
+					}
+				}
+			}
+		} else if w.hadPrev && w.hadRot {
+			// Stationary mobs still turn their heads towards the walk target.
+			if ro, isRot := e.(rotator); isRot {
+				_, head := ro.curRot()
+				if angleByte(head) != angleByte(w.prevHead) {
+					headBody := protocol.NewWriter()
+					headBody.VarInt(v776.PacketPlayRotateHead)
+					java.WriteRotateHead(headBody, e.entityID(), angleByte(head))
+					for _, p := range players {
+						if p.seenEnt[e.entityID()] {
+							_ = p.conn.sendPacket(headBody.Bytes())
+						}
+					}
 				}
 			}
 		}

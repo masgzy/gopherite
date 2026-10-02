@@ -103,6 +103,8 @@ func (c *conn) handleSetCarriedItem() error {
 	if p := c.player; p != nil && slot >= 0 && slot < int32(len(defaultHotbar)) {
 		p.heldSlot = slot
 	}
+	// A hotbar swap interrupts an in-progress eat.
+	c.cancelEating()
 	return nil
 }
 

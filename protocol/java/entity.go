@@ -8,23 +8,23 @@ import (
 // orders follow the 26.2 (protocol 776) packets report; see the add_entity
 // and set_entity_data entries there.
 
-// WriteAddEntity encodes minecraft:add_entity. Velocity components are in
-// units of 1/8000 block per tick; data is the per-type auxiliary int.
+// WriteAddEntity encodes minecraft:add_entity in the 26.2 field order:
+// id, uuid, type, position, low-precision velocity, pitch/yaw/head-yaw
+// angle bytes, then the per-type auxiliary int. Velocity is in blocks per
+// tick and goes through the LpVec3 codec (a zero vector is one byte).
 func WriteAddEntity(w *protocol.Writer, entityID int32, uuid [16]byte, typeID int32,
-	x, y, z float64, pitch, yaw, headYaw byte, data int32, vx, vy, vz int16) {
+	x, y, z float64, vx, vy, vz float64, pitch, yaw, headYaw byte, data int32) {
 	w.VarInt(entityID)
 	w.UUID(uuid)
 	w.VarInt(typeID)
 	w.Double(x)
 	w.Double(y)
 	w.Double(z)
+	WriteLpVec3(w, vx, vy, vz)
 	w.Byte(pitch)
 	w.Byte(yaw)
 	w.Byte(headYaw)
 	w.VarInt(data)
-	w.Int16(vx)
-	w.Int16(vy)
-	w.Int16(vz)
 }
 
 // WriteRemoveEntities encodes minecraft:remove_entities.
@@ -45,20 +45,81 @@ func WriteMoveEntityPos(w *protocol.Writer, entityID int32, dx, dy, dz int16, on
 	w.Bool(onGround)
 }
 
-// WriteTeleportEntity encodes minecraft:teleport_entity (full position,
-// used when a move would overflow the 1/4096 delta shorts).
+// WriteTeleportEntity encodes minecraft:teleport_entity in the 26.2 form:
+// id, PositionMoveRotation (position, low-precision velocity, yaw/pitch
+// floats), the relative-axes bitmask (fixed int32) and the ground flag.
 func WriteTeleportEntity(w *protocol.Writer, entityID int32, x, y, z float64,
-	vx, vy, vz float64, yaw, pitch byte, onGround bool) {
+	vx, vy, vz float64, yaw, pitch float32, relatives int32, onGround bool) {
 	w.VarInt(entityID)
 	w.Double(x)
 	w.Double(y)
 	w.Double(z)
-	w.Double(vx)
-	w.Double(vy)
-	w.Double(vz)
+	WriteLpVec3(w, vx, vy, vz)
+	w.Float(yaw)
+	w.Float(pitch)
+	w.Int32(relatives)
+	w.Bool(onGround)
+}
+
+// WriteEntityPositionSync encodes minecraft:entity_position_sync: like
+// teleport_entity without the relative mask. Used to re-sync an entity
+// whose accumulated move deltas would overflow.
+func WriteEntityPositionSync(w *protocol.Writer, entityID int32, x, y, z float64,
+	vx, vy, vz float64, yaw, pitch float32, onGround bool) {
+	w.VarInt(entityID)
+	w.Double(x)
+	w.Double(y)
+	w.Double(z)
+	WriteLpVec3(w, vx, vy, vz)
+	w.Float(yaw)
+	w.Float(pitch)
+	w.Bool(onGround)
+}
+
+// WriteMoveEntityPosRot encodes minecraft:move_entity_pos_rot: the same
+// delta shorts as move_entity_pos plus absolute yaw/pitch angle bytes.
+func WriteMoveEntityPosRot(w *protocol.Writer, entityID int32, dx, dy, dz int16,
+	yaw, pitch byte, onGround bool) {
+	w.VarInt(entityID)
+	w.Int16(dx)
+	w.Int16(dy)
+	w.Int16(dz)
 	w.Byte(yaw)
 	w.Byte(pitch)
 	w.Bool(onGround)
+}
+
+// WriteRotateHead encodes minecraft:rotate_head (head yaw is independent
+// of body yaw for mobs).
+func WriteRotateHead(w *protocol.Writer, entityID int32, headYaw byte) {
+	w.VarInt(entityID)
+	w.Byte(headYaw)
+}
+
+// WriteSetEntityMotion encodes minecraft:set_entity_motion with the
+// low-precision velocity codec.
+func WriteSetEntityMotion(w *protocol.Writer, entityID int32, vx, vy, vz float64) {
+	w.VarInt(entityID)
+	WriteLpVec3(w, vx, vy, vz)
+}
+
+// AttributeSnapshot is one tracked attribute for update_attributes; the
+// 26.2 wire form carries the registry id, the base value and the modifier
+// list (always empty in gopherite).
+type AttributeSnapshot struct {
+	ID   int32
+	Base float64
+}
+
+// WriteUpdateAttributes encodes minecraft:update_attributes.
+func WriteUpdateAttributes(w *protocol.Writer, entityID int32, attrs []AttributeSnapshot) {
+	w.VarInt(entityID)
+	w.VarInt(int32(len(attrs)))
+	for _, a := range attrs {
+		w.VarInt(a.ID)
+		w.Double(a.Base)
+		w.VarInt(0) // modifiers
+	}
 }
 
 // WriteSetEntityDataItem encodes minecraft:set_entity_data carrying the

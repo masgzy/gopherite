@@ -569,6 +569,30 @@ configDone:
 			}
 		case v776.PacketPlayCommands:
 			// Declare Commands: payload not needed for the bot.
+		case v776.PacketPlaySetHealth:
+			// M8 vitals: health float, food varint, saturation float.
+			_, _ = rr.Float()
+			_, _ = rr.VarInt()
+			_, _ = rr.Float()
+		case v776.PacketPlaySetExperience:
+			// M8 XP bar: progress float, level varint, total varint.
+			_, _ = rr.Float()
+			_, _ = rr.VarInt()
+			_, _ = rr.VarInt()
+		case v776.PacketPlayUpdateAttributes:
+			// M8 attribute sync: entity id, then per-attr id/base/modifiers.
+			_, _ = rr.VarInt()
+			n, _ := rr.VarInt()
+			for i := int32(0); i < n; i++ {
+				_, _ = rr.VarInt()
+				_, _ = rr.Double()
+				ms, _ := rr.VarInt()
+				for j := int32(0); j < ms; j++ {
+					_, _ = rr.String(128)
+					_, _ = rr.Double()
+					_, _ = rr.VarInt()
+				}
+			}
 		case v776.PacketPlayContainerContent:
 			// M7 full inventory-menu sync: window, state, 46 slots + carried.
 			_, _ = rr.VarInt() // container id

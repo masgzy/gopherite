@@ -37,6 +37,7 @@ func registerCommands(root *cmdNode) {
 	root.add(literalf("help").setExec(cmdHelp))
 	root.add(literalf("seed").setExec(cmdSeed))
 	root.add(literalf("list").setExec(cmdList))
+	root.add(literalf("kill").setExec(cmdKill))
 
 	root.add(literalf("say").add(
 		argf("message", "minecraft:message", java.ParserMessage, "message").setExec(cmdSay)))
@@ -106,6 +107,18 @@ func cmdHelp(c *conn, _ map[string]string) error {
 
 func cmdSeed(c *conn, _ map[string]string) error {
 	return c.sendSystemChat(fmt.Sprintf("§7种子: §f%d§7", c.s.world.seed))
+}
+
+func cmdKill(c *conn, _ map[string]string) error {
+	s := c.s
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p := c.player
+	if p == nil || p.dead {
+		return nil
+	}
+	s.damagePlayerLocked(p, p.health+1, v776.DamageTypeGenericKill, -1, -1)
+	return nil
 }
 
 func cmdList(c *conn, _ map[string]string) error {

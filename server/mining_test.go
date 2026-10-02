@@ -125,7 +125,11 @@ configDone:
 			v776.PacketPlayCommands,
 			v776.PacketPlayContainerSetSlot, v776.PacketPlaySetCursorItem,
 			v776.PacketPlayOpenScreen, v776.PacketPlayCBContainerClose,
-			v776.PacketPlayLevelChunk, v776.PacketPlayChunkBatchStart:
+			v776.PacketPlayLevelChunk, v776.PacketPlayChunkBatchStart,
+			// M8 vitals, sent between the held slot and the
+			// starter inventory during the spawn sequence.
+			v776.PacketPlaySetHealth, v776.PacketPlaySetExperience,
+			v776.PacketPlayUpdateAttributes:
 			continue
 		default:
 			t.Fatalf("unexpected packet 0x%x while joining", id)

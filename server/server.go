@@ -209,6 +209,11 @@ func (s *Server) tickOnce() {
 	// M5: entity ticks (item physics, pickup) + tracker reconciliation.
 	s.tickEntities()
 
+	// M8: survival ticks (hunger, regen, void, eating) for every player.
+	for _, p := range s.playerListLocked() {
+		s.tickSurvival(p)
+	}
+
 	s.stats.record(time.Since(start), time.Now())
 	s.tickCount++
 	if s.tickCount%20 == 0 {
@@ -274,6 +279,11 @@ func (s *Server) Serve() error {
 	s.startTicker()
 	s.autosaveLoop()
 	close(s.started)
+	// M8: seed the passive herd around spawn (production worlds only;
+	// tests construct focused entity sets themselves).
+	if s.opts.LevelName != "" {
+		s.spawnStarterMobs()
+	}
 	for {
 		c, err := s.ln.Accept()
 		if err != nil {
