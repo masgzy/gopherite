@@ -34,6 +34,7 @@ const (
 func registerCommands(root *cmdNode) {
 	root.add(literalf("tps").setExec(cmdTPS))
 	root.add(literalf("tpsbar").setExec(cmdTPSBar))
+	root.add(literalf("gc").setExec(cmdGC))
 	root.add(literalf("help").setExec(cmdHelp))
 	root.add(literalf("seed").setExec(cmdSeed))
 	root.add(literalf("list").setExec(cmdList))
@@ -101,8 +102,26 @@ func cmdTPSBar(c *conn, _ map[string]string) error {
 	return c.toggleTpsbar()
 }
 
+// cmdGC answers /gc with the tuner readout (or a hint when disabled).
+func cmdGC(c *conn, _ map[string]string) error {
+	if c.s.gc == nil {
+		return c.sendSystemChat("§7智能 GC 调控未启用（server.properties: gc-tuning=true 开启）")
+	}
+	return c.sendSystemChat(formatGC(c.s.gc.snapshot()))
+}
+
+// formatGC renders the /gc text readout.
+func formatGC(s gcSnapshot) string {
+	lim := "未设置"
+	if s.MemLimitMiB > 0 {
+		lim = fmt.Sprintf("%dMiB", s.MemLimitMiB)
+	}
+	return fmt.Sprintf("§6GC 状态: §fGOGC=%d §7(堆 %.1fMB · 上限 %s)\n§7分配 §f%.1fMB/s §7· GC CPU §f%.1f%% §7· P99 暂停 §f%.2fms §7· 已调控 §f%d §7次",
+		s.GOGC, s.HeapMB, lim, s.AllocMBPS, s.GCCPUPct, s.PauseP99MS, s.Adjusts)
+}
+
 func cmdHelp(c *conn, _ map[string]string) error {
-	return c.sendSystemChat("§6可用命令: §f/tps /tpsbar /help /seed /list /say <消息> /give <玩家> <物品> [数量] /tp <x y z|玩家> /gamemode <模式> /time set <tick> /setblock <x y z> <方块>")
+	return c.sendSystemChat("§6可用命令: §f/tps /tpsbar /gc /help /seed /list /say <消息> /give <玩家> <物品> [数量] /tp <x y z|玩家> /gamemode <模式> /time set <tick> /setblock <x y z> <方块>")
 }
 
 func cmdSeed(c *conn, _ map[string]string) error {

@@ -69,6 +69,15 @@ type Options struct {
 	// online-mode hasJoined verification. Empty means the production
 	// endpoint; tests point this at a stub.
 	SessionServerURL string
+
+	// 智能 GC 调控（Gopherite 扩展）。GCTuning 关闭时不启动调控器。
+	GCTuning         bool
+	GCTargetPauseMS  int
+	GCMemLimitMiB    int64
+	GCMinGOGC        int
+	GCMaxGOGC        int
+	GCBaseGOGC       int
+	GCSampleInterval int
 }
 
 // Server accepts connections and drives the per-connection state machine.
@@ -124,6 +133,9 @@ type Server struct {
 
 	// nextEntityID is the vanilla entity id counter; players included.
 	nextEntityID atomic.Int32
+
+	// gc 是智能 GC 调控器；nil 表示未启用（GCTuning=false 或测试）。
+	gc *gcTuner
 }
 
 // playerListLocked returns the joined players; caller holds mu.
@@ -274,6 +286,17 @@ func New(opts Options) (*Server, error) {
 	}
 	s := &Server{opts: opts, world: newWorld(0), players: make(map[*conn]*player), entities: make(map[int32]entity), blockEnts: make(map[[3]int]*blockEntity), stop: make(chan struct{}), started: make(chan struct{})}
 	s.nextEntityID.Store(0) // first allocEntityID() yields 1, matching tests
+	if opts.GCTuning {
+		s.gc = newGCTuner(gcConfig{
+			Enabled:     true,
+			TargetPause: time.Duration(opts.GCTargetPauseMS) * time.Millisecond,
+			MemLimit:    opts.GCMemLimitMiB << 20,
+			MinGOGC:     opts.GCMinGOGC,
+			MaxGOGC:     opts.GCMaxGOGC,
+			BaseGOGC:    opts.GCBaseGOGC,
+			Interval:    time.Duration(opts.GCSampleInterval) * time.Second,
+		})
+	}
 	if opts.LevelName != "" {
 		// M4: replay persisted chunks before accepting connections.
 		s.world.enableSaving(opts.LevelName)
@@ -320,6 +343,9 @@ func (s *Server) Serve() error {
 	}
 	s.startTicker()
 	s.autosaveLoop()
+	if s.gc != nil {
+		s.gc.start(s.stop, &s.wg)
+	}
 	close(s.started)
 	// M8: seed the passive herd around spawn (production worlds only;
 	// tests construct focused entity sets themselves).

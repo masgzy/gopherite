@@ -84,6 +84,13 @@ func main() {
 		ReadTimeoutSeconds: cfg.ReadTimeout,
 		LevelName:          cfg.LevelName,
 		ViewDistance:       cfg.ViewDistance,
+		GCTuning:           cfg.GCTuning,
+		GCTargetPauseMS:    cfg.GCTargetPauseMS,
+		GCMemLimitMiB:      cfg.GCMemLimitMiB,
+		GCMinGOGC:          cfg.GCMinGOGC,
+		GCMaxGOGC:          cfg.GCMaxGOGC,
+		GCBaseGOGC:         cfg.GCBaseGOGC,
+		GCSampleInterval:   cfg.GCSampleInterval,
 	})
 	if err != nil {
 		log.Fatal(err)

@@ -27,6 +27,15 @@ type Config struct {
 	ReadTimeout          int
 	LevelName            string // world directory, vanilla level-name
 	ViewDistance         int    // server-side chunk radius cap
+
+	// 智能 GC 调控（Gopherite 扩展键）。
+	GCTuning         bool  // 闭环动态 GOGC 调控开关
+	GCTargetPauseMS  int   // P99 暂停目标（毫秒）
+	GCMemLimitMiB    int64 // 内存天花板 MiB；0 = 自动探测（cgroup/系统内存 × 90%）
+	GCMinGOGC        int   // 调控下限档
+	GCMaxGOGC        int   // 调控上限档
+	GCBaseGOGC       int   // 启动基线
+	GCSampleInterval int   // 采样周期（秒）
 }
 
 // Path is the conventional configuration file name.
@@ -71,6 +80,13 @@ func parse(doc string) (*Config, error) {
 		ReadTimeout:          30,
 		LevelName:            "world",
 		ViewDistance:         8,
+		GCTuning:             true,
+		GCTargetPauseMS:      2,
+		GCMemLimitMiB:        0,
+		GCMinGOGC:            20,
+		GCMaxGOGC:            300,
+		GCBaseGOGC:           100,
+		GCSampleInterval:     1,
 	}
 	for i, line := range strings.Split(doc, "\n") {
 		line = strings.TrimSpace(line)
@@ -104,6 +120,20 @@ func parse(doc string) (*Config, error) {
 			cfg.LevelName = v
 		case "view-distance":
 			cfg.ViewDistance, err = strconv.Atoi(v)
+		case "gc-tuning":
+			cfg.GCTuning = v == "true"
+		case "gc-target-pause-ms":
+			cfg.GCTargetPauseMS, err = strconv.Atoi(v)
+		case "gc-mem-limit-mib":
+			cfg.GCMemLimitMiB, err = strconv.ParseInt(v, 10, 64)
+		case "gc-min-gogc":
+			cfg.GCMinGOGC, err = strconv.Atoi(v)
+		case "gc-max-gogc":
+			cfg.GCMaxGOGC, err = strconv.Atoi(v)
+		case "gc-base-gogc":
+			cfg.GCBaseGOGC, err = strconv.Atoi(v)
+		case "gc-sample-interval":
+			cfg.GCSampleInterval, err = strconv.Atoi(v)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("line %d: key %s: %w", i+1, k, err)
@@ -120,6 +150,24 @@ func parse(doc string) (*Config, error) {
 	}
 	if cfg.ViewDistance > 32 {
 		cfg.ViewDistance = 32
+	}
+	if cfg.GCTargetPauseMS < 1 {
+		cfg.GCTargetPauseMS = 1
+	}
+	if cfg.GCMemLimitMiB < 0 {
+		cfg.GCMemLimitMiB = 0
+	}
+	if cfg.GCSampleInterval < 1 {
+		cfg.GCSampleInterval = 1
+	}
+	if cfg.GCMinGOGC < 1 {
+		cfg.GCMinGOGC = 20
+	}
+	if cfg.GCMaxGOGC < cfg.GCMinGOGC {
+		cfg.GCMaxGOGC = 300
+	}
+	if cfg.GCBaseGOGC < 1 {
+		cfg.GCBaseGOGC = 100
 	}
 	return cfg, nil
 }
