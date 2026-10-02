@@ -89,6 +89,7 @@ go build -trimpath -ldflags "-s -w" -o gopherite ./cmd/gopherite
 | `network-compression-threshold` | `256` | 压缩阈值（M2 已生效） |
 | `server-icon` | （空） | 64×64 PNG 图标路径 |
 | `read-timeout` | `30` | 握手/状态阶段读超时（秒） |
+| `write-timeout` | `10` | 单包写超时（秒）；防止慢客户端阻塞广播 |
 
 ## 🏗️ 架构
 

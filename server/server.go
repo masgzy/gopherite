@@ -53,6 +53,12 @@ type Options struct {
 	// the handshake and status states.
 	ReadTimeoutSeconds int
 
+	// WriteTimeoutSeconds bounds a single packet write. A client that
+	// stops reading fills its TCP send buffer and would otherwise block
+	// every lock-held broadcast forever; when the deadline trips, the
+	// write is abandoned and the connection closed.
+	WriteTimeoutSeconds int
+
 	// ViewDistance is the server-side chunk radius sent to clients.
 	ViewDistance int
 
@@ -288,6 +294,9 @@ func New(opts Options) (*Server, error) {
 	}
 	if opts.ReadTimeoutSeconds <= 0 {
 		opts.ReadTimeoutSeconds = 30
+	}
+	if opts.WriteTimeoutSeconds <= 0 {
+		opts.WriteTimeoutSeconds = int(defaultWriteTimeout / time.Second)
 	}
 	if opts.ViewDistance <= 0 {
 		opts.ViewDistance = 8

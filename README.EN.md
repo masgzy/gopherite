@@ -90,6 +90,7 @@ Vanilla-style `server.properties` (`key=value`, `#` comments). Unknown keys are 
 | `network-compression-threshold` | `256` | packet compression threshold (effective since M2) |
 | `server-icon` | (empty) | 64×64 PNG icon path |
 | `read-timeout` | `30` | handshake/status read timeout (seconds) |
+| `write-timeout` | `10` | per-packet write timeout (seconds); guards broadcasts against stalled clients |
 
 ## 🏗️ Architecture
 

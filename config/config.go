@@ -25,6 +25,7 @@ type Config struct {
 	CompressionThreshold int // -1 disables; enforced from M2
 	IconPath             string
 	ReadTimeout          int
+	WriteTimeout         int
 	LevelName            string // world directory, vanilla level-name
 	ViewDistance         int    // server-side chunk radius cap
 
@@ -78,6 +79,7 @@ func parse(doc string) (*Config, error) {
 		OnlineMode:           true,
 		CompressionThreshold: 256,
 		ReadTimeout:          30,
+		WriteTimeout:         10,
 		LevelName:            "world",
 		ViewDistance:         8,
 		GCTuning:             true,
@@ -116,6 +118,8 @@ func parse(doc string) (*Config, error) {
 			cfg.IconPath = v
 		case "read-timeout":
 			cfg.ReadTimeout, err = strconv.Atoi(v)
+		case "write-timeout":
+			cfg.WriteTimeout, err = strconv.Atoi(v)
 		case "level-name":
 			cfg.LevelName = v
 		case "view-distance":
