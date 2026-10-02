@@ -3,12 +3,20 @@ GO      ?= go
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 LDFLAGS  = -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)
+VANILLA ?= vanilla
 
-.PHONY: build test vet fmt fmtcheck bench clean
+.PHONY: build test vet fmt fmtcheck bench gen clean
 
 ## build: 构建单二进制到 dist/
 build:
 	$(GO) build -trimpath -ldflags "$(LDFLAGS)" -o dist/gopherite ./cmd/gopherite
+
+## gen: 从原版数据重新生成注册表 Go 代码（需先 extract_vanilla_data.py）
+gen:
+	python3 scripts/gen_blockstates.py --report $(VANILLA)/reports/reports/blocks.json --out server/blocks_gen.go
+	python3 scripts/gen_items.py --reports $(VANILLA)/reports/reports --out server/items_gen.go
+	python3 scripts/gen_recipes.py --data $(VANILLA)/data/minecraft --out server/recipes_gen.go
+	gofmt -w server/blocks_gen.go server/items_gen.go server/recipes_gen.go
 
 ## test: 运行全部测试
 test:

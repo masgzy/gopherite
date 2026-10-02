@@ -118,8 +118,8 @@ gopherite/
 - [x] **M2** login flow (offline + online modes, encryption, compression) + superflat chunks + walking in a world
 - [x] **M3** block breaking/placing, chunk management, simplified lighting
 - [x] **M4** full NBT + Anvil world persistence
-- [x] **M5** entities (physics, basic AI) (current)
-- [ ] **M6** registry pipeline: extract blocks/items/recipes from the vanilla jar and generate Go code
+- [x] **M5** entities (physics, basic AI)
+- [x] **M6** registry pipeline: extract blocks/items/recipes from the vanilla jar and generate Go code (current)
 - [ ] **M7** inventory / crafting / commands (Brigadier port) / redstone
 - [ ] **P**  Paper / Purpur behaviour parity
 
@@ -131,6 +131,22 @@ make vet       # go vet ./...
 make fmt       # gofmt across the repo
 make build     # dist/gopherite
 ```
+
+### Registry data pipeline (M6)
+
+`server/blocks_gen.go`, `items_gen.go` and `recipes_gen.go` are generated from vanilla 26.2 data by committed scripts. To bump versions, re-run the pipeline:
+
+```bash
+# 1) extract recipes / item tags and generate the data reports (JDK 21+)
+python3 scripts/extract_vanilla_data.py --jar server.jar --out vanilla
+
+# 2) regenerate the three Go tables (blocks / items / recipes) + gofmt
+make gen VANILLA=vanilla
+```
+
+- Generators emit deterministic output (blocks sorted by name, recipes by file name), so committed diffs stay noise-free;
+- The item → placed-block mapping is derived by name equality plus a small hand-audited exception table (`ADD_BLOCK`/`DEL_BLOCK` in `gen_items.py`); spot-check it after a version bump;
+- `recipes_gen.go` resolves item tags recursively at generation time; ingredient expressions are `minecraft:item`, `#minecraft:tag` or '|'-joined alternatives.
 
 Requires Go 1.27+ (install easily with [g](https://github.com/voidint/g)). Contributions are welcome — start with [CONTRIBUTING.md](CONTRIBUTING.md).
 

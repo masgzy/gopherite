@@ -117,8 +117,8 @@ gopherite/
 - [x] **M2** 登录流程（离线 + 正版双模、加密、压缩）+ 超平坦区块 + 进入世界行走
 - [x] **M3** 方块破坏/放置、区块管理与简化光照
 - [x] **M4** 完整 NBT + Anvil 存档读写（世界持久化）
-- [x] **M5** 实体系统（物理、基础 AI）（当前）
-- [ ] **M6** 注册表数据管线：从原版 jar 提取 blocks/items/recipes 自动生成 Go 代码
+- [x] **M5** 实体系统（物理、基础 AI）
+- [x] **M6** 注册表数据管线：从原版 jar 提取 blocks/items/recipes 自动生成 Go 代码（当前）
 - [ ] **M7** 背包 / 合成 / 命令系统（Brigadier 移植）/ 红石
 - [ ] **P**  Paper / Purpur 行为差异复刻
 
@@ -130,6 +130,22 @@ make vet       # go vet ./...
 make fmt       # gofmt 全仓库格式化
 make build     # dist/gopherite
 ```
+
+### 注册表数据管线（M6）
+
+`server/blocks_gen.go`、`items_gen.go`、`recipes_gen.go` 由脚本从原版 26.2 数据生成，升级版本时重新执行一遍即可：
+
+```bash
+# 1) 从原版 server.jar 提取配方/item tag 并生成数据报告（需 JDK 21+）
+python3 scripts/extract_vanilla_data.py --jar server.jar --out vanilla
+
+# 2) 重新生成三张 Go 表（blocks / items / recipes）并 gofmt
+make gen VANILLA=vanilla
+```
+
+- 生成器按确定性顺序输出（块名字典序、配方文件名排序），提交前 diff 无噪声；
+- item→方块放置映射由名称匹配 + 少量人工校验例外表（`gen_items.py` 的 `ADD_BLOCK`/`DEL_BLOCK`）得出，升级版本后建议抽查；
+- `recipes_gen.go` 在生成期递归解析 item tag，配料表达式为 `minecraft:物品`、`#minecraft:tag` 或 `|` 连接的备选项。
 
 要求 Go 1.27+（推荐用 [g](https://github.com/voidint/g) 安装）。欢迎通过 Issue / PR 参与，请先阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
