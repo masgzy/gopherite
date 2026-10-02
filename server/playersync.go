@@ -180,9 +180,16 @@ func (s *Server) broadcastEntityEventToTrackers(entityID int32, event byte, excl
 // broadcastSwing shows the attacker's arm swing on every other client
 // that tracks the attacker. Caller holds s.mu.
 func (s *Server) broadcastSwing(attacker *player) {
+	s.broadcastAnimate(attacker, java.AnimateSwingMainHand)
+}
+
+// broadcastAnimate plays one clientbound animate action (swing, critical
+// hit, ...) on every other client that tracks the attacker. Caller holds
+// s.mu.
+func (s *Server) broadcastAnimate(attacker *player, action byte) {
 	body := protocol.NewWriter()
 	body.VarInt(v776.PacketPlayAnimate)
-	java.WriteAnimate(body, attacker.id, java.AnimateSwingMainHand)
+	java.WriteAnimate(body, attacker.id, action)
 	for _, o := range s.players {
 		if o != attacker && o.seenPlayers[attacker.id] {
 			_ = o.conn.sendPacket(body.Bytes())

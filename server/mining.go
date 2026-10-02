@@ -119,8 +119,13 @@ func (c *conn) handlePlayerAction() error {
 			}
 		}
 		c.s.mu.Unlock()
-	case java.ActionReleaseUseItem, java.ActionSwapItemWithOffhand:
-		// Right-click released (or off-hand swap): abort an in-progress eat.
+	case java.ActionReleaseUseItem:
+		// Right-click released: fire a drawn bow (M11) and abort an
+		// in-progress eat.
+		c.releaseBow()
+		c.cancelEating()
+	case java.ActionSwapItemWithOffhand:
+		// Off-hand swap aborts without firing.
 		c.cancelEating()
 	}
 	return nil

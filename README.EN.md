@@ -124,7 +124,8 @@ gopherite/
 - [x] **M8** survival basics (health / hunger / eating / fall & void damage / death & respawn / `/kill`) + passive mobs (pig / cow / sheep / chicken: wander AI, panic on hit, knockback, death drops)
 - [x] **M8.5** multiplayer visibility (players see each other / tab-list sync) + XP orbs + mob fall damage + herd top-up
 - [x] **M9** hostile mobs (zombie / skeleton / creeper: chase AI, melee / archery / fuse explosion, daylight burning, night spawning) + day/night cycle (26.2 WorldClock) + entity sounds
-- [x] **M10** container blocks (27-slot chest + furnace: fuel / smelting / burn & cook progress / burn-out cooldown, XP settlement, break & explosion content spills, vanilla-compatible Anvil persistence); fixes the M7 wire bug where container clicks were never dispatched plus the window-id collision (current)
+- [x] **M10** container blocks (27-slot chest + furnace: fuel / smelting / burn & cook progress / burn-out cooldown, XP settlement, break & explosion content spills, vanilla-compatible Anvil persistence); fixes the M7 wire bug where container clicks were never dispatched plus the window-id collision
+- [x] **M11** combat & defense: armor reduction (official 26.2 ArmorMaterials values and the `bypasses_armor` tag, vanilla reduction formula, diamond/netherite toughness), player bow (draw & charge, vanilla power curve, hits mobs and other players, stuck arrows collectible, survival ammo consumption), melee upgrades (per-weapon attack-speed cooldown, falling critical hits at 1.5x with the crit animation, PvP melee with knockback, the full 26.2 weapon damage table including the copper tier and the rebalanced axes), arm-swing animation broadcast (current)
 - [ ] **P**  Paper / Purpur behaviour parity
 
 ## 🧑‍💻 Development

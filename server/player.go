@@ -63,6 +63,11 @@ type player struct {
 	sprinting      bool
 	lastAttackTick int64 // server tick of the last melee swing
 
+	// M11 bow draw: usingBow is true between UseItem and the release.
+	// useStartTick anchors the charge time. Server.mu-guarded.
+	usingBow     bool
+	useStartTick int64
+
 	// seenEnt holds the entity ids streamed to this player, guarded by
 	// Server.mu (ticker entity sync touches it).
 	seenEnt map[int32]bool

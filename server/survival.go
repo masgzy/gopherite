@@ -49,6 +49,10 @@ var foodByItem = map[int32]foodValue{}
 // other item (or a bare hand) deals 1.
 var weaponDamage = map[int32]float32{}
 
+// weaponSpeed maps weapon item ids to their vanilla attack speed
+// (attacks per second); anything absent attacks at the bare-hand 4/s.
+var weaponSpeed = map[int32]float32{}
+
 func init() {
 	foods := map[string]foodValue{
 		"minecraft:apple":           {4, 2.4},
@@ -69,23 +73,122 @@ func init() {
 			foodByItem[id] = v
 		}
 	}
+	// 26.2 weapon attack damage: 1 (base) + material bonus + type bonus,
+	// extracted from the official jar's Items bootstrap. Axes were
+	// rebalanced in 26.x — every tier converges at 9 (netherite 10).
 	weapons := map[string]float32{
+		// Swords (1.6 attacks/s).
 		"minecraft:wooden_sword":    4,
 		"minecraft:stone_sword":     5,
+		"minecraft:copper_sword":    5,
+		"minecraft:golden_sword":    4,
 		"minecraft:iron_sword":      6,
 		"minecraft:diamond_sword":   7,
 		"minecraft:netherite_sword": 8,
-		"minecraft:wooden_axe":      7,
-		"minecraft:stone_axe":       9,
-		"minecraft:iron_axe":        10,
-		"minecraft:diamond_axe":     11,
-		"minecraft:netherite_axe":   12,
+		// Axes (0.8-1.0 attacks/s).
+		"minecraft:wooden_axe":    7,
+		"minecraft:stone_axe":     9,
+		"minecraft:copper_axe":    9,
+		"minecraft:golden_axe":    7,
+		"minecraft:iron_axe":      9,
+		"minecraft:diamond_axe":   9,
+		"minecraft:netherite_axe": 10,
+		// Pickaxes (1.2 attacks/s).
+		"minecraft:wooden_pickaxe":    2,
+		"minecraft:stone_pickaxe":     3,
+		"minecraft:copper_pickaxe":    3,
+		"minecraft:golden_pickaxe":    2,
+		"minecraft:iron_pickaxe":      4,
+		"minecraft:diamond_pickaxe":   5,
+		"minecraft:netherite_pickaxe": 6,
+		// Shovels (1 attack/s).
+		"minecraft:wooden_shovel":    2.5,
+		"minecraft:stone_shovel":     2.5,
+		"minecraft:copper_shovel":    2.5,
+		"minecraft:golden_shovel":    2.5,
+		"minecraft:iron_shovel":      2.5,
+		"minecraft:diamond_shovel":   2.5,
+		"minecraft:netherite_shovel": 2.5,
+		// Hoes (1-4 attacks/s, all deal 1).
+		"minecraft:wooden_hoe":    1,
+		"minecraft:stone_hoe":     1,
+		"minecraft:copper_hoe":    1,
+		"minecraft:golden_hoe":    1,
+		"minecraft:iron_hoe":      1,
+		"minecraft:diamond_hoe":   1,
+		"minecraft:netherite_hoe": 1,
+		// Specials: mace (0.6/s) and trident (1.1/s).
+		"minecraft:mace":    6,
+		"minecraft:trident": 9,
 	}
 	for name, dmg := range weapons {
 		if id, ok := itemIDByName[name]; ok {
 			weaponDamage[id] = dmg
 		}
 	}
+	// M11 attack speeds (attacks per second) for the same items; the bare
+	// hand attacks 4/s. Cooldown ticks = round(20 / speed).
+	speeds := map[string]float32{
+		"minecraft:wooden_sword":      1.6,
+		"minecraft:stone_sword":       1.6,
+		"minecraft:copper_sword":      1.6,
+		"minecraft:golden_sword":      1.6,
+		"minecraft:iron_sword":        1.6,
+		"minecraft:diamond_sword":     1.6,
+		"minecraft:netherite_sword":   1.6,
+		"minecraft:wooden_axe":        0.8,
+		"minecraft:stone_axe":         0.8,
+		"minecraft:copper_axe":        0.8,
+		"minecraft:golden_axe":        1.0,
+		"minecraft:iron_axe":          0.9,
+		"minecraft:diamond_axe":       1.0,
+		"minecraft:netherite_axe":     1.0,
+		"minecraft:wooden_pickaxe":    1.2,
+		"minecraft:stone_pickaxe":     1.2,
+		"minecraft:copper_pickaxe":    1.2,
+		"minecraft:golden_pickaxe":    1.2,
+		"minecraft:iron_pickaxe":      1.2,
+		"minecraft:diamond_pickaxe":   1.2,
+		"minecraft:netherite_pickaxe": 1.2,
+		"minecraft:wooden_shovel":     1.0,
+		"minecraft:stone_shovel":      1.0,
+		"minecraft:copper_shovel":     1.0,
+		"minecraft:golden_shovel":     1.0,
+		"minecraft:iron_shovel":       1.0,
+		"minecraft:diamond_shovel":    1.0,
+		"minecraft:netherite_shovel":  1.0,
+		"minecraft:wooden_hoe":        1.0,
+		"minecraft:stone_hoe":         2.0,
+		"minecraft:copper_hoe":        2.0,
+		"minecraft:golden_hoe":        1.0,
+		"minecraft:iron_hoe":          3.0,
+		"minecraft:diamond_hoe":       4.0,
+		"minecraft:netherite_hoe":     4.0,
+		"minecraft:mace":              0.6,
+		"minecraft:trident":           1.1,
+	}
+	for name, speed := range speeds {
+		if id, ok := itemIDByName[name]; ok {
+			weaponSpeed[id] = speed
+		}
+	}
+}
+
+// attackCooldownTicks returns the swing cooldown for the held weapon in
+// ticks: round(20 / attack speed), bare hand 5 (4 attacks/s).
+// Caller holds s.mu.
+func (p *player) attackCooldownTicks() int64 {
+	speed := float32(4.0)
+	if held := p.slots[p.heldSlot]; held.count > 0 {
+		if s, ok := weaponSpeed[held.item]; ok {
+			speed = s
+		}
+	}
+	ticks := int64(math.Round(20.0 / float64(speed)))
+	if ticks < 1 {
+		ticks = 1
+	}
+	return ticks
 }
 
 // --- packet helpers --------------------------------------------------------
@@ -168,11 +271,20 @@ func (s *Server) damagePlayerLocked(p *player, amount float32, dmgType int32, ca
 	if p.gameMode != 0 { // creative/adventure/spectator: no damage in M8
 		return
 	}
+	// M11: worn armor absorbs physical hits (see armor.go for the 26.2
+	// values and the vanilla bypasses_armor list).
+	amount = reduceDamageByArmor(amount, dmgType, p)
+	if amount <= 0 {
+		// Maxed armor cannot fully negate a hit in vanilla (floor at 20%
+		// of the raw hit), but keep the guard for safety.
+		return
+	}
 	p.health -= amount
 	if p.health < 0 {
 		p.health = 0
 	}
 	p.eatTicksLeft = 0 // pain interrupts eating
+	p.usingBow = false // pain interrupts drawing a bow
 	if p.health <= 0 {
 		s.killPlayerLocked(p, deathMessage(dmgType))
 		return
@@ -190,6 +302,7 @@ func (s *Server) killPlayerLocked(p *player, message string) {
 	p.health = 0
 	p.dead = true
 	p.eatTicksLeft = 0
+	p.usingBow = false
 	p.mining = nil
 	// Vanilla drops the whole inventory and the XP on death. Items go out
 	// through the locked spawn path (spawnPlayerDrop would re-lock mu).
@@ -409,6 +522,24 @@ func (p *player) moveExhaustion(dx, dz float64) {
 
 // --- eating ------------------------------------------------------------------
 
+// useItemStart routes a right-click use: a bow begins the M11 draw,
+// everything else takes the M8 eating path. Called from the connection
+// goroutine.
+func (c *conn) useItemStart(hand int32) {
+	s := c.s
+	s.mu.Lock()
+	heldBow := false
+	if p := c.player; p != nil && !p.dead {
+		heldBow = p.slots[p.heldSlot].item == itemIDByName[bowItemName]
+	}
+	s.mu.Unlock()
+	if heldBow {
+		c.startBowDraw()
+		return
+	}
+	c.startEating(hand)
+}
+
 // startEating begins consuming the held item if it is food and there is
 // room for it. Called from the connection goroutine.
 func (c *conn) startEating(hand int32) {
@@ -432,13 +563,14 @@ func (c *conn) startEating(hand int32) {
 	p.eatingFood = fv
 }
 
-// cancelEating stops an in-progress bite (release, hotbar swap, damage).
-// Caller holds no lock.
+// cancelEating stops an in-progress bite or bow draw (release, hotbar
+// swap, damage). Caller holds no lock.
 func (c *conn) cancelEating() {
 	s := c.s
 	s.mu.Lock()
 	if p := c.player; p != nil {
 		p.eatTicksLeft = 0
+		p.usingBow = false // M11: an abort kills a draw without firing
 	}
 	s.mu.Unlock()
 }

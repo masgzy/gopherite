@@ -76,7 +76,9 @@ func (c *conn) handlePlay() error {
 		if err != nil {
 			return err
 		}
-		c.startEating(hand)
+		// M11: a bow starts the draw; everything else keeps the M8
+		// eating path.
+		c.useItemStart(hand)
 		return nil
 	case v776.PacketPlayUseItemOn:
 		return c.handleUseItemOn()
@@ -95,7 +97,12 @@ func (c *conn) handlePlay() error {
 	case v776.PacketPlaySBContainerClose:
 		return c.handleContainerClose()
 	case v776.PacketPlaySwing:
-		// Arm swing: no entity animation broadcast yet (M3+).
+		// M11: mirror the arm swing to every client tracking us.
+		if p := c.player; p != nil {
+			c.s.mu.Lock()
+			c.s.broadcastSwing(p)
+			c.s.mu.Unlock()
+		}
 		return nil
 	case v776.PacketPlayClientTickEnd:
 		return java.ReadPlayClientTickEnd(c.rd)

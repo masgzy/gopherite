@@ -356,6 +356,13 @@ func (m *mobEntity) wanderBrain() {
 // hurt applies player melee damage: knockback, hurt feedback and death.
 // Caller holds Server.mu.
 func (s *Server) hurtMobLocked(m *mobEntity, attacker *player, dmg float32) {
+	s.hurtMobTypeLocked(m, attacker, dmg, v776.DamageTypePlayerAtk)
+}
+
+// hurtMobTypeLocked is hurtMobLocked with an explicit damage type (M11
+// arrow hits report minecraft:arrow, melee reports player_attack).
+// Caller holds Server.mu.
+func (s *Server) hurtMobTypeLocked(m *mobEntity, attacker *player, dmg float32, dmgType int32) {
 	if m.deathTicks > 0 {
 		return
 	}
@@ -398,7 +405,7 @@ func (s *Server) hurtMobLocked(m *mobEntity, attacker *player, dmg float32) {
 	tyaw := float32(math.Atan2(-(attacker.x-m.x), attacker.z-m.z) * 180 / math.Pi)
 	dmgBody := protocol.NewWriter()
 	dmgBody.VarInt(v776.PacketPlayDamageEvent)
-	java.WriteDamageEvent(dmgBody, m.id, v776.DamageTypePlayerAtk, attacker.id, attacker.id)
+	java.WriteDamageEvent(dmgBody, m.id, dmgType, attacker.id, attacker.id)
 	hurtBody := protocol.NewWriter()
 	hurtBody.VarInt(v776.PacketPlayHurtAnimation)
 	java.WriteHurtAnimation(hurtBody, m.id, tyaw)
@@ -589,7 +596,8 @@ func encodeMobSpawn(w *protocol.Writer, m *mobEntity) {
 }
 
 // handleAttack processes the 26.2 dedicated attack packet: reach check,
-// weapon damage, cooldown, then the mob's hurt feedback.
+// per-weapon cooldown, critical hits, then hurt feedback on the mob or
+// the PvP target.
 func (c *conn) handleAttack(targetID int32) error {
 	s := c.s
 	s.mu.Lock()
@@ -598,25 +606,49 @@ func (c *conn) handleAttack(targetID int32) error {
 	if p == nil || p.dead {
 		return nil
 	}
-	if s.tickCount-p.lastAttackTick < mobAttackCooldown {
+	// M11: the swing cooldown follows the held weapon's attack speed
+	// (swords 1.6/s, axes 0.8-1.0/s, bare hand 4/s, ...).
+	if s.tickCount-p.lastAttackTick < p.attackCooldownTicks() {
 		return nil
 	}
-	m, ok := s.entities[targetID].(*mobEntity)
-	if !ok {
-		return nil // attacking players/items/orbs is not a thing here
+	m, isMob := s.entities[targetID].(*mobEntity)
+	var victim *player
+	if !isMob {
+		// M11 PvP: survival players may melee each other.
+		for _, o := range s.players {
+			if o.id == targetID {
+				victim = o
+				break
+			}
+		}
+		if victim == nil || victim.id == p.id {
+			return nil // attacking items/orbs is not a thing here
+		}
 	}
 
-	// Vanilla-style reach: eye position to the nearest point of the mob's
-	// bounding box, capped at 3 blocks.
-	m.mu.Lock()
+	// Vanilla-style reach: eye position to the nearest point of the
+	// target's bounding box, capped at 3 blocks.
 	eyeY := p.y + 1.62
-	cx := math.Max(m.x-m.def.width/2, math.Min(p.x, m.x+m.def.width/2))
-	cy := math.Max(m.y, math.Min(eyeY, m.y+m.def.height))
-	cz := math.Max(m.z-m.def.width/2, math.Min(p.z, m.z+m.def.width/2))
-	dx, dy, dz := p.x-cx, eyeY-cy, p.z-cz
-	withinReach := dx*dx+dy*dy+dz*dz <= 9.0
-	health := m.health
-	m.mu.Unlock()
+	var withinReach bool
+	var health float32
+	if isMob {
+		m.mu.Lock()
+		hw := float64(m.def.width) / 2
+		cx := math.Max(m.x-hw, math.Min(p.x, m.x+hw))
+		cy := math.Max(m.y, math.Min(eyeY, m.y+float64(m.def.height)))
+		cz := math.Max(m.z-hw, math.Min(p.z, m.z+hw))
+		dx, dy, dz := p.x-cx, eyeY-cy, p.z-cz
+		withinReach = dx*dx+dy*dy+dz*dz <= 9.0
+		health = m.health
+		m.mu.Unlock()
+	} else {
+		cx := math.Max(victim.x-0.3, math.Min(p.x, victim.x+0.3))
+		cy := math.Max(victim.y, math.Min(eyeY, victim.y+1.8))
+		cz := math.Max(victim.z-0.3, math.Min(p.z, victim.z+0.3))
+		dx, dy, dz := p.x-cx, eyeY-cy, p.z-cz
+		withinReach = dx*dx+dy*dy+dz*dz <= 9.0
+		health = 1
+	}
 	if !withinReach || health <= 0 {
 		return nil
 	}
@@ -629,10 +661,39 @@ func (c *conn) handleAttack(targetID int32) error {
 			dmg = w
 		}
 	}
+	// M11: a falling attack is a vanilla critical hit — 1.5x damage plus
+	// the crit animation on every tracking client. (Enchantment/sneak
+	// exclusions stay out of scope.)
+	if !p.onGround && p.fallDistance > 0 {
+		dmg *= 1.5
+		s.broadcastAnimate(p, java.AnimateCriticalHit)
+	}
 	// Melee costs exhaustion like vanilla (0.1 per swing).
 	p.exhaustion += 0.1
-	s.hurtMobLocked(m, p, dmg)
+	if isMob {
+		s.hurtMobLocked(m, p, dmg)
+	} else {
+		s.pvpMeleeLocked(p, victim, dmg)
+	}
 	return nil
+}
+
+// pvpMeleeLocked lands a player melee hit on another player: damage
+// event to the victim and vanilla knockback away from the attacker.
+// Caller holds s.mu.
+func (s *Server) pvpMeleeLocked(attacker, victim *player, dmg float32) {
+	if victim.dead || victim.gameMode != 0 {
+		return
+	}
+	s.damagePlayerLocked(victim, dmg, v776.DamageTypePlayerAtk, attacker.id, attacker.id)
+	dx := victim.x - attacker.x
+	dz := victim.z - attacker.z
+	if d := math.Sqrt(dx*dx + dz*dz); d > 0.001 {
+		kb := protocol.NewWriter()
+		kb.VarInt(v776.PacketPlaySetEntityMotion)
+		java.WriteSetEntityMotion(kb, victim.id, dx/d*mobKnockbackH, mobKnockbackV, dz/d*mobKnockbackH)
+		_ = victim.conn.sendPacket(kb.Bytes())
+	}
 }
 
 // mobFallDamage applies a pending landing hit; runs after tick() on the
