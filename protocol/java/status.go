@@ -91,7 +91,10 @@ func ReadStatusResponse(body []byte) (StatusResponse, error) {
 // PingRequest is the serverbound latency probe payload.
 func ReadPingRequest(r *protocol.Reader) (int64, error) { return r.Int64() }
 
-// MaxStatusJSONLen bounds the status response document size. The value
-// matches the theoretical maximum string length accepted by the vanilla
-// client for this packet.
-const MaxStatusJSONLen = 738137128
+// MaxStatusJSONLen bounds the status response document size in characters.
+// The 26.2 client reads the whole document with
+// ByteBufCodecs.lenientJson(32767), which goes through Utf8String.read and
+// throws DecoderException once the decoded string exceeds 32767 chars —
+// before any JSON leniency can help, so an oversized document kills the
+// server list ping outright instead of degrading gracefully.
+const MaxStatusJSONLen = 32767

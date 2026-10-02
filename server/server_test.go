@@ -104,6 +104,12 @@ func TestServerListPing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read json: %v", err)
 	}
+	// The vanilla client reads the whole document as one string capped
+	// at MaxStatusJSONLen chars; anything longer aborts the ping before
+	// the MOTD can ever render.
+	if len(body) > java.MaxStatusJSONLen {
+		t.Fatalf("status document %d chars exceeds client limit %d", len(body), java.MaxStatusJSONLen)
+	}
 	status, err := java.ReadStatusResponse([]byte(body))
 	if err != nil {
 		t.Fatalf("parse json: %v (%s)", err, body)
