@@ -154,9 +154,11 @@ func (s *Server) syncEntities() {
 		if w.meta {
 			body := protocol.NewWriter()
 			s.encodeMetadata(body, e)
-			for _, p := range players {
-				if p.seenEnt[e.entityID()] {
-					_ = p.conn.sendPacket(body.Bytes())
+			if body.Len() > 0 { // entities without metadata encode nothing
+				for _, p := range players {
+					if p.seenEnt[e.entityID()] {
+						_ = p.conn.sendPacket(body.Bytes())
+					}
 				}
 			}
 		}
@@ -166,6 +168,9 @@ func (s *Server) syncEntities() {
 		s.encodeSpawn(spawnBody, e)
 		metaBody := protocol.NewWriter()
 		s.encodeMetadata(metaBody, e)
+		// Mobs carry no metadata: encodeMetadata writes nothing for them,
+		// and an EMPTY frame would abort the client's decoder outright.
+		hasMeta := metaBody.Len() > 0
 		for _, p := range players {
 			dx := p.x - ex
 			dy := p.y - ey
@@ -173,7 +178,9 @@ func (s *Server) syncEntities() {
 			d2 := dx*dx + dy*dy + dz*dz
 			if d2 <= entityTrackRange2 && !p.seenEnt[e.entityID()] {
 				_ = p.conn.sendPacket(spawnBody.Bytes())
-				_ = p.conn.sendPacket(metaBody.Bytes())
+				if hasMeta {
+					_ = p.conn.sendPacket(metaBody.Bytes())
+				}
 				p.seenEnt[e.entityID()] = true
 			} else if d2 > entityTrackRange2+entityDespawnSlop2 && p.seenEnt[e.entityID()] {
 				delete(p.seenEnt, e.entityID())

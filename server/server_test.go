@@ -233,12 +233,12 @@ func (b *botConn) next() (int32, *protocol.Reader) {
 		}
 	}
 	r := protocol.NewReader(payload)
+	if debugBotPackets {
+		b.t.Logf("next raw: len=%d bytes=% x", len(payload), payload[:minInt(16, len(payload))])
+	}
 	id, err := r.VarInt()
 	if err != nil {
-		b.t.Fatalf("packet id: %v", err)
-	}
-	if debugBotPackets {
-		b.t.Logf("next: id=0x%x payload[0:8]=% x len=%d", id, payload[:minInt(8, len(payload))], len(payload))
+		b.t.Fatalf("packet id: %v (payload len %d)", err, len(payload))
 	}
 	return id, r
 }

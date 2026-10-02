@@ -33,6 +33,12 @@ func skipRegistryPayload(t *testing.T, rr *protocol.Reader) {
 // joinBotToPlay walks the offline login + configuration + play setup path
 // and returns once the initial chunk batch has been streamed.
 func joinBotToPlay(t *testing.T, s *Server, name string) *botConn {
+	return joinBotToPlayVD(t, s, name, 2)
+}
+
+// joinBotToPlayVD joins with an explicit client view distance so latency
+// tests can exercise the production chunk radius.
+func joinBotToPlayVD(t *testing.T, s *Server, name string, viewDistance byte) *botConn {
 	t.Helper()
 	b := dialBot(t, s.Addr().String())
 
@@ -73,7 +79,7 @@ func joinBotToPlay(t *testing.T, s *Server, name string) *botConn {
 			}
 			cw := protocol.NewWriter()
 			cw.VarInt(v776.PacketConfigClientInfo)
-			cw.String("en_US").Byte(2).VarInt(0).Bool(true)
+			cw.String("en_US").Byte(viewDistance).VarInt(0).Bool(true)
 			cw.Byte(0).VarInt(1).Bool(false).Bool(false).VarInt(0)
 			b.write(cw.Bytes())
 			kw := protocol.NewWriter()
@@ -129,7 +135,12 @@ configDone:
 			// M8 vitals, sent between the held slot and the
 			// starter inventory during the spawn sequence.
 			v776.PacketPlaySetHealth, v776.PacketPlaySetExperience,
-			v776.PacketPlayUpdateAttributes:
+			v776.PacketPlayUpdateAttributes,
+			// M8 mobs stream as soon as the player is tracked; the drain
+			// phase sees the starter herd's packets.
+			v776.PacketPlayAddEntity, v776.PacketPlaySetEntityMotion,
+			v776.PacketPlayMoveEntityPos, v776.PacketPlayMoveEntityPosRot,
+			v776.PacketPlayRotateHead, v776.PacketPlayEntityEvent:
 			continue
 		default:
 			t.Fatalf("unexpected packet 0x%x while joining", id)

@@ -121,7 +121,16 @@ func (s *Server) handleConn(nc net.Conn) {
 // with the current cipher/compression settings. The layering mirrors
 // vanilla Netty: compress first, then encrypt, then the plaintext length
 // VarInt around the encrypted frame.
+//
+// The WHOLE pipeline runs under writeMu: the zlib scratch buffer in
+// CompressionLayer and the CFB8 keystream state are per-connection
+// mutable state, and this method is called from the dispatch goroutine,
+// the keep-alive ticker and the entity/bossbar tickers concurrently.
+// Compressing outside the lock produced corrupted interleaved frames
+// (truncated packets on real joins at large view distances).
 func (c *conn) sendPacket(body []byte) error {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
 	payload := body
 	if c.compression != nil {
 		payload = c.compression.CompressInner(body)
@@ -130,8 +139,6 @@ func (c *conn) sendPacket(body []byte) error {
 		buf := make([]byte, 0, len(payload)+16)
 		payload = c.encrypt.Crypt(buf, payload)
 	}
-	c.writeMu.Lock()
-	defer c.writeMu.Unlock()
 	return protocol.WriteFramed(c.bw, payload)
 }
 
