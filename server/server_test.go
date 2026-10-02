@@ -561,6 +561,32 @@ configDone:
 				_, _ = rr.VarInt()
 				_, _ = rr.VarInt()
 			}
+		case v776.PacketPlayContainerContent:
+			// M7 full inventory-menu sync: window, state, 46 slots + carried.
+			_, _ = rr.VarInt() // container id
+			_, _ = rr.VarInt() // state id
+			n, _ := rr.VarInt()
+			for i := int32(0); i < n; i++ {
+				cnt, _ := rr.VarInt()
+				if cnt > 0 {
+					_, _ = rr.VarInt()
+					_, _ = rr.VarInt()
+					_, _ = rr.VarInt()
+				}
+			}
+			ccnt, _ := rr.VarInt()
+			if ccnt > 0 {
+				_, _ = rr.VarInt()
+				_, _ = rr.VarInt()
+				_, _ = rr.VarInt()
+			}
+		case v776.PacketPlaySetCursorItem:
+			ccnt, _ := rr.VarInt()
+			if ccnt > 0 {
+				_, _ = rr.VarInt()
+				_, _ = rr.VarInt()
+				_, _ = rr.VarInt()
+			}
 		case v776.PacketPlayGameEvent:
 			ev, _ := rr.Byte()
 			_, _ = rr.Float()

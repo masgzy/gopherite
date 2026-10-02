@@ -89,6 +89,8 @@ func (c *conn) startPlay() error {
 		seenEnt:  make(map[int32]bool),
 		onGround: true,
 		barUUID:  newBarUUID(),
+
+		invMenu: newInventoryMenu(),
 	}
 	c.player = p
 	c.s.addPlayer(p)
@@ -153,6 +155,9 @@ func (c *conn) startPlay() error {
 
 	// Starter hotbar (per-slot inventory sync).
 	c.sendStarterInventory()
+
+	// Full inventory-menu state (vanilla sendAllDataToRemote on initMenu).
+	p.invMenu.sendAll(c)
 
 	// Tab list initialisation with this player only.
 	c.wr.Reset()

@@ -69,6 +69,12 @@ const (
 	PacketPlaySBCarriedItem      = 0x35
 	PacketPlaySwing              = 0x3F
 	PacketPlayUseItemOn          = 0x42
+	PacketPlaySBContainerButton  = 0x11
+	PacketPlaySBContainerClick   = 0x12
+	PacketPlaySBContainerClose   = 0x13
+	PacketPlayPlayerInput        = 0x2B
+	PacketPlaySetCreativeSlot    = 0x38
+	PacketPlayUseItem            = 0x43
 )
 
 // Clientbound packet identifiers, per connection state.
@@ -140,6 +146,11 @@ const (
 	PacketPlayHeldSlot         = 0x69
 	PacketPlaySetPlayerInv     = 0x6C
 	PacketPlayTakeItemEntity   = 0x7C
+	PacketPlayCBContainerClose = 0x11
+	PacketPlayContainerContent = 0x12
+	PacketPlayContainerSetSlot = 0x14
+	PacketPlayOpenScreen       = 0x3B
+	PacketPlaySetCursorItem    = 0x60
 	PacketPlaySetTime          = 0x71
 	PacketPlaySystemChat       = 0x79
 	PacketPlayTabList          = 0x7A

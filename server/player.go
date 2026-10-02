@@ -28,6 +28,18 @@ type player struct {
 	// Server.mu like the rest of the player model.
 	heldSlot int32
 
+	// sneaking mirrors the last Player Input packet (shift flag).
+	sneaking bool
+
+	// armor/offhand extend the inventory model (inv slots 36-39/40);
+	// craft grid lives in invMenu, openMenu is the transient container.
+	armor    [4]invSlot // head, chest, legs, feet (inv 39..36)
+	offhand  invSlot
+	invMenu  *menu // container id 0, always open
+	openMenu *menu // crafting table window, nil when closed
+	// nextWindowID hands out server-side container ids (1+).
+	nextWindowID int32
+
 	// seenEnt holds the entity ids streamed to this player, guarded by
 	// Server.mu (ticker entity sync touches it).
 	seenEnt map[int32]bool

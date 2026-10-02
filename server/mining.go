@@ -101,6 +101,24 @@ func (c *conn) handlePlayerAction() error {
 		}
 		c.s.mu.Unlock()
 		c.ackSequence(a.Sequence)
+	case java.ActionDropAllItem, java.ActionDropItem:
+		// Q key: drop from the selected hotbar slot (all / one).
+		c.s.mu.Lock()
+		p2 := c.player
+		if p2 != nil && p2.heldSlot >= 0 && p2.heldSlot < int32(len(p2.slots)) {
+			held := p2.slots[p2.heldSlot]
+			if held.count > 0 {
+				drop := held.count
+				if a.Action == java.ActionDropItem {
+					drop = 1
+				}
+				held.count -= drop
+				p2.slots[p2.heldSlot] = held
+				c.s.spawnPlayerDrop(p2, held.item, drop)
+				c.sendSlot(p2.heldSlot, held)
+			}
+		}
+		c.s.mu.Unlock()
 	}
 	return nil
 }

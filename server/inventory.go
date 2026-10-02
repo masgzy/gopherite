@@ -2,6 +2,7 @@ package server
 
 import (
 	"log"
+	"sync"
 
 	"github.com/masgzy/gopherite/internal/ui"
 	"github.com/masgzy/gopherite/protocol"
@@ -116,16 +117,47 @@ var faceOffset = [6][3]int{
 	{1, 0, 0},  // east
 }
 
+// itemNamesByID is the reverse of itemIDByName, built lazily once.
+var (
+	nameOnce      sync.Once
+	itemNamesByID map[int32]string
+)
+
+func itemNameOf(id int32) string {
+	nameOnce.Do(func() {
+		itemNamesByID = make(map[int32]string, len(itemIDByName))
+		for name, i := range itemIDByName {
+			itemNamesByID[i] = name
+		}
+	})
+	return itemNamesByID[id]
+}
+
 // placeBlock resolves the held block item, computes the face-adjacent
-// position and fills it when the target is air. Client predictions settle
-// via the BlockChangedAck plus the authoritative Block Update.
+// position and fills it when the target is air. The held stack is
+// consumed (survival); right-clicking a crafting table opens its menu
+// instead unless the player sneaks. Client predictions settle via the
+// BlockChangedAck plus the authoritative Block Update.
 func (c *conn) placeBlock(u java.ServerboundUseItemOn) {
 	p := c.player
-	if p == nil || p.heldSlot < 0 || int(p.heldSlot) >= len(defaultHotbar) {
+	if p == nil || p.heldSlot < 0 || p.heldSlot >= int32(len(p.slots)) {
 		return
 	}
-	item := defaultHotbar[p.heldSlot]
-	block, ok := itemBlockName[item]
+	// Interact blocks first: a crafting table opens its 3x3 grid menu.
+	if !p.sneaking {
+		state := c.s.world.getBlock(int(u.X), int(u.Y), int(u.Z))
+		if blockNameOf(int(state)) == "minecraft:crafting_table" {
+			c.s.mu.Lock()
+			c.openCrafting()
+			c.s.mu.Unlock()
+			return
+		}
+	}
+	held := p.slots[p.heldSlot]
+	if held.count <= 0 {
+		return
+	}
+	block, ok := itemBlockName[itemNameOf(held.item)]
 	if !ok {
 		return
 	}
@@ -144,6 +176,26 @@ func (c *conn) placeBlock(u java.ServerboundUseItemOn) {
 	if !c.s.world.setBlock(x, y, z, int32(state)) {
 		return
 	}
+	held.count--
+	p.slots[p.heldSlot] = held
+	c.sendSlot(p.heldSlot, held)
 	c.s.broadcastBlockUpdate(int32(x), int32(y), int32(z), int32(state))
-	log.Printf(ui.Success("OK ")+"%s 放置了 %s (%d, %d, %d)", p.name, item, x, y, z)
+	log.Printf(ui.Success("OK ")+"%s 放置了 %s (%d, %d, %d)", p.name, block, x, y, z)
+}
+
+// spawnPlayerDrop drops item entities at the player (cursor drops,
+// container overflow, inventory throws). Caller holds Server.mu.
+func (s *Server) spawnPlayerDrop(p *player, itemID, count int32) {
+	if itemID <= 0 || count <= 0 {
+		return
+	}
+	for count > 0 {
+		take := count
+		if take > itemMaxStack {
+			take = itemMaxStack
+		}
+		e := newItemEntity(s.allocEntityID(), p.x, p.y+0.5, p.z, itemID, take)
+		s.spawnEntity(e)
+		count -= take
+	}
 }

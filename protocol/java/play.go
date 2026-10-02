@@ -589,3 +589,225 @@ func WriteSetPlayerInventory(w *protocol.Writer, slot int32, itemID int32, count
 func ReadSetCarriedItem(r *protocol.Reader) (int32, error) {
 	return r.VarInt()
 }
+
+// --- M7: containers, crafting, player input -------------------------------
+
+// ItemStack is the plain (no component overrides) stack shape shared by
+// the container packets. ID is the item registry id; ID 0 / count 0
+// encodes as an empty optional stack.
+type ItemStack struct {
+	ID    int32
+	Count int32
+}
+
+func writeOptionalStack(w *protocol.Writer, s ItemStack) {
+	if s.Count <= 0 || s.ID <= 0 {
+		w.VarInt(0)
+		return
+	}
+	w.VarInt(s.Count)
+	w.VarInt(s.ID + 1) // baked holder reference: registry index + 1
+	w.VarInt(0)        // component patch: no additions
+	w.VarInt(0)        // ... and no removals
+}
+
+// WriteOpenScreen opens a container window: container id VarInt, menu
+// registry id VarInt, title component.
+func WriteOpenScreen(w *protocol.Writer, containerID, menuID int32, title string) {
+	w.VarInt(containerID)
+	w.VarInt(menuID)
+	WriteTextComponent(w, title)
+}
+
+// WriteContainerSetContent syncs a whole window: container id, state id,
+// stack list then the carried stack.
+func WriteContainerSetContent(w *protocol.Writer, containerID, stateID int32, slots []ItemStack, carried ItemStack) {
+	w.VarInt(containerID)
+	w.VarInt(stateID)
+	w.VarInt(int32(len(slots)))
+	for _, s := range slots {
+		writeOptionalStack(w, s)
+	}
+	writeOptionalStack(w, carried)
+}
+
+// WriteContainerSetSlot updates one window cell: container id, state id,
+// slot (short) and the new stack.
+func WriteContainerSetSlot(w *protocol.Writer, containerID, stateID, slot int32, s ItemStack) {
+	w.VarInt(containerID)
+	w.VarInt(stateID)
+	w.Uint16(uint16(slot))
+	writeOptionalStack(w, s)
+}
+
+// WriteContainerClose closes a window client-side.
+func WriteContainerClose(w *protocol.Writer, containerID int32) {
+	w.VarInt(containerID)
+}
+
+// WriteSetCursorItem pushes the carried (cursor) stack.
+func WriteSetCursorItem(w *protocol.Writer, s ItemStack) {
+	writeOptionalStack(w, s)
+}
+
+// ServerboundContainerClick mirrors the vanilla 26.2 click packet. The
+// changed-slot hashes and the carried hash are parsed but ignored: this
+// server is authoritative over its own model and re-syncs full state
+// after every click.
+type ServerboundContainerClick struct {
+	ContainerID int32
+	StateID     int32
+	Slot        int16
+	Button      int8
+	Input       int32 // ContainerInput: 0 pickup .. 6 pickup-all
+}
+
+// readHashedStack consumes one optional hashed stack (bool + holder id +
+// count + hashed component patch map).
+func readHashedStack(r *protocol.Reader) error {
+	present, err := r.Bool()
+	if err != nil || !present {
+		return err
+	}
+	if _, err := r.VarInt(); err != nil { // holder id
+		return err
+	}
+	if _, err := r.VarInt(); err != nil { // count
+		return err
+	}
+	adds, err := r.VarInt()
+	if err != nil {
+		return err
+	}
+	for i := int32(0); i < adds; i++ {
+		if _, err := r.VarInt(); err != nil { // component type registry id
+			return err
+		}
+		if _, err := r.Int32(); err != nil { // CRC32 hash
+			return err
+		}
+	}
+	removes, err := r.VarInt()
+	if err != nil {
+		return err
+	}
+	for i := int32(0); i < removes; i++ {
+		if _, err := r.VarInt(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ReadContainerClick decodes the full click packet, skipping the
+// client-prediction slot hashes.
+func ReadContainerClick(r *protocol.Reader) (ServerboundContainerClick, error) {
+	var c ServerboundContainerClick
+	var err error
+	if c.ContainerID, err = r.VarInt(); err != nil {
+		return c, err
+	}
+	if c.StateID, err = r.VarInt(); err != nil {
+		return c, err
+	}
+	slot, err := r.Uint16()
+	if err != nil {
+		return c, err
+	}
+	c.Slot = int16(slot)
+	button, err := r.Byte()
+	if err != nil {
+		return c, err
+	}
+	c.Button = int8(button)
+	if c.Input, err = r.VarInt(); err != nil {
+		return c, err
+	}
+	changed, err := r.VarInt()
+	if err != nil {
+		return c, err
+	}
+	for i := int32(0); i < changed; i++ {
+		if _, err := r.Uint16(); err != nil { // slot number
+			return c, err
+		}
+		if err := readHashedStack(r); err != nil {
+			return c, err
+		}
+	}
+	return c, readHashedStack(r) // carried item
+}
+
+// ReadContainerClose decodes the window id of a close notification.
+func ReadContainerClose(r *protocol.Reader) (int32, error) {
+	return r.VarInt()
+}
+
+// ReadContainerButton decodes the container id + button id pair.
+func ReadContainerButton(r *protocol.Reader) (int32, int32, error) {
+	id, err := r.VarInt()
+	if err != nil {
+		return 0, 0, err
+	}
+	button, err := r.VarInt()
+	return id, button, err
+}
+
+// Player input flags (26.2 wire order).
+const (
+	InputForward = 1 << iota
+	InputBackward
+	InputLeft
+	InputRight
+	InputJump
+	InputShift
+	InputSprint
+)
+
+// ReadPlayerInput decodes the one-byte movement input flags.
+func ReadPlayerInput(r *protocol.Reader) (byte, error) {
+	return r.Byte()
+}
+
+// ReadSetCreativeModeSlot parses and discards a creative slot set
+// (slot short + optional stack); survival servers ignore it.
+func ReadSetCreativeModeSlot(r *protocol.Reader) (int32, error) {
+	slot, err := r.Uint16()
+	if err != nil {
+		return 0, err
+	}
+	// optional stack: bool present; when present holder + count + patch
+	// (same shape as the hashed stack minus hashing)
+	present, err := r.Bool()
+	if err != nil || !present {
+		return int32(slot), err
+	}
+	if _, err := r.VarInt(); err != nil {
+		return int32(slot), err
+	}
+	if _, err := r.VarInt(); err != nil {
+		return int32(slot), err
+	}
+	adds, err := r.VarInt()
+	if err != nil {
+		return int32(slot), err
+	}
+	for i := int32(0); i < adds; i++ {
+		if _, err := r.VarInt(); err != nil {
+			return int32(slot), err
+		}
+		// UNTRUSTED component value: NBT payload — skip by structure is
+		// not possible without an NBT walker; creative packets carry the
+		// same empty-patch shape in practice (adds=0).
+		if adds <= 1 {
+			break
+		}
+	}
+	removes, err := r.VarInt()
+	for i := int32(0); i < removes; i++ {
+		if _, err := r.VarInt(); err != nil {
+			return int32(slot), err
+		}
+	}
+	return int32(slot), err
+}
