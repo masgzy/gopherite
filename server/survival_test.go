@@ -38,7 +38,11 @@ func expectNoise(b *botConn, want int32) *protocol.Reader {
 			v776.PacketPlaySetEntityData, v776.PacketPlayAddEntity,
 			v776.PacketPlayMoveEntityPos, v776.PacketPlayMoveEntityPosRot,
 			v776.PacketPlayRotateHead, v776.PacketPlaySetPlayerInv,
-			v776.PacketPlaySetHealth, v776.PacketPlaySetExperience:
+			v776.PacketPlaySetHealth, v776.PacketPlaySetExperience,
+			// M9 background traffic: clock resyncs, sounds and the
+			// explosion packet can interleave anywhere.
+			v776.PacketPlaySetTime, v776.PacketPlaySound,
+			v776.PacketPlayExplode:
 			continue
 		default:
 			b.t.Fatalf("want packet 0x%x, got 0x%x", want, id)
@@ -148,9 +152,12 @@ func TestFallDamageFromMovement(t *testing.T) {
 	_ = s
 
 	sendPos := func(y float64, ground bool) {
+		s.mu.Lock()
+		bx, bz := p.x, p.z
+		s.mu.Unlock()
 		w := protocol.NewWriter()
 		w.VarInt(v776.PacketPlayMovePos)
-		w.Double(p.x).Double(y).Double(p.z)
+		w.Double(bx).Double(y).Double(bz)
 		w.Bool(ground)
 		b.write(w.Bytes())
 		time.Sleep(5 * time.Millisecond) // let the conn goroutine digest

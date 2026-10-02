@@ -240,6 +240,50 @@ func WritePlayGameEvent(w *protocol.Writer, event byte, value float32) {
 	w.Float(value)
 }
 
+// WritePlaySound encodes minecraft:sound (26.2 ClientboundSoundPacket).
+// The sound event travels as a direct registry holder (id 0 = direct,
+// then resource location + optional fixed range), which avoids needing
+// the sound_event network id table. Coordinates are world units; the
+// packet encodes them ×8 as fixed-point ints (LOCATION_ACCURACY).
+func WritePlaySound(w *protocol.Writer, soundID string, source int32,
+	x, y, z, volume, pitch float32, seed int64) {
+	w.VarInt(0) // holder: 0 = direct entry follows
+	w.String(soundID)
+	w.Byte(0) // no fixed range
+	w.VarInt(source)
+	w.Int32(int32(x * 8))
+	w.Int32(int32(y * 8))
+	w.Int32(int32(z * 8))
+	w.Float(volume)
+	w.Float(pitch)
+	w.Int64(seed)
+}
+
+// WritePlayExplode encodes minecraft:explode (26.2 ClientboundExplodePacket):
+// the client renders the flash/particles and plays the explosion sound,
+// and applies playerKnockback when present. blockCount is informational;
+// block particles are an empty weighted list. The particle travels by
+// registry id (explosion_emitter = 29), the sound as a direct holder.
+func WritePlayExplode(w *protocol.Writer, cx, cy, cz float64, radius float32,
+	blockCount int32, kbx, kby, kbz float64, particleID int32, soundID string) {
+	w.Double(cx)
+	w.Double(cy)
+	w.Double(cz)
+	w.Float(radius)
+	w.VarInt(blockCount)
+	w.Bool(kbx != 0 || kby != 0 || kbz != 0) // optional player knockback
+	if kbx != 0 || kby != 0 || kbz != 0 {
+		w.Double(kbx)
+		w.Double(kby)
+		w.Double(kbz)
+	}
+	w.VarInt(particleID) // ParticleTypes.STREAM_CODEC: registry id, no payload
+	w.VarInt(0)          // sound holder: 0 = direct entry follows
+	w.String(soundID)
+	w.Byte(0)   // no fixed range
+	w.VarInt(0) // weighted block particle list: empty
+}
+
 // WritePlayKeepAlive encodes the keep-alive challenge.
 func WritePlayKeepAlive(w *protocol.Writer, id int64) {
 	w.Int64(id)

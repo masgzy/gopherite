@@ -1,0 +1,258 @@
+package server
+
+import (
+	"math"
+	"sync"
+
+	"github.com/masgzy/gopherite/protocol"
+	"github.com/masgzy/gopherite/protocol/java"
+	"github.com/masgzy/gopherite/protocol/java/v776"
+)
+
+// M9 arrow projectile. Skeletons fire these; the server runs the
+// authoritative flight (vanilla gravity 0.05, inertia 0.99) while the
+// client free-simulates from the initial velocity in add_entity, so
+// move-delta corrections stream exactly like they do for items. Hit
+// detection runs on the tick loop; the actual damage applies in the
+// ticker's consume pass to respect the s.mu -> e.mu lock order.
+
+// Vanilla AbstractArrow constants.
+const (
+	arrowGravity    = 0.05
+	arrowInertia    = 0.99
+	arrowBaseDamage = 2.0
+	arrowLifespan   = 1200 // stuck arrows despawn after 60 s
+)
+
+// arrowEntity is one flying or stuck arrow.
+type arrowEntity struct {
+	mu         sync.Mutex
+	id         int32
+	uuid       [16]byte
+	x, y, z    float64
+	vx, vy, vz float64
+	yaw, pitch float32
+	shooter    int32
+
+	stuck bool
+	age   int32
+
+	px, py, pz float64 // position at the start of this tick (segment hits)
+
+	nx, ny, nz   float64
+	hasNet       bool
+	nyaw, npitch float32
+	hasRot       bool
+	dead         bool
+	pendingHit   int32 // player entity id this arrow hit, consumed by the ticker
+}
+
+func (e *arrowEntity) entityID() int32 { return e.id }
+func (e *arrowEntity) typeID() int32   { return v776.EntityTypeArrow }
+func (e *arrowEntity) xPos() (float64, float64, float64) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.x, e.y, e.z
+}
+func (e *arrowEntity) onGroundFlag() bool { return false }
+func (e *arrowEntity) alive() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return !e.dead
+}
+func (e *arrowEntity) metadataDirty() bool { return false }
+func (e *arrowEntity) clearMetadataDirty() {}
+func (e *arrowEntity) netPos() (float64, float64, float64, bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.nx, e.ny, e.nz, e.hasNet
+}
+func (e *arrowEntity) setNetPos(x, y, z float64) {
+	e.mu.Lock()
+	e.nx, e.ny, e.nz, e.hasNet = x, y, z, true
+	e.mu.Unlock()
+}
+func (e *arrowEntity) curRot() (float32, float32) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.yaw, e.pitch
+}
+func (e *arrowEntity) netRot() (float32, float32, bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.nyaw, e.npitch, e.hasRot
+}
+func (e *arrowEntity) setNetRot(yaw, pitch float32) {
+	e.mu.Lock()
+	e.nyaw, e.npitch, e.hasRot = yaw, pitch, true
+	e.mu.Unlock()
+}
+
+// updateRotation derives the render orientation from the velocity
+// (vanilla lerps it, but per-tick recomputation is close enough).
+// Caller holds e.mu.
+func (e *arrowEntity) updateRotation() {
+	h := math.Sqrt(e.vx*e.vx + e.vz*e.vz)
+	e.yaw = float32(math.Atan2(e.vx, e.vz) * 180 / math.Pi)
+	e.pitch = float32(math.Atan2(e.vy, h) * 180 / math.Pi)
+}
+
+// tick advances one server tick: ballistic flight, block impact and the
+// player-hit segment test. Runs on the ticker goroutine.
+func (e *arrowEntity) tick(s *Server) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.age++
+	if e.age >= arrowLifespan {
+		e.dead = true
+		return
+	}
+	if e.stuck {
+		return
+	}
+
+	e.px, e.py, e.pz = e.x, e.y, e.z
+	e.vx *= arrowInertia
+	e.vy = e.vy*arrowInertia - arrowGravity
+	e.vz *= arrowInertia
+	e.x += e.vx
+	e.y += e.vy
+	e.z += e.vz
+	e.updateRotation()
+
+	// Block impact: the 0.25 probe box touching anything solid sticks the
+	// arrow where it stands (vanilla stores the exact entry face; the
+	// visual difference is negligible at this speed).
+	if s.entityBoxCollides(e.x, e.y, e.z) {
+		e.x -= e.vx
+		e.y -= e.vy
+		e.z -= e.vz
+		e.vx, e.vy, e.vz = 0, 0, 0
+		e.stuck = true
+		return
+	}
+
+	// Player hit: solve the closest approach of this tick's flight segment
+	// to each player's body. Damage scales with impact speed like vanilla.
+	s.mu.Lock()
+	var best *player
+	bestD2 := 1e9
+	for _, p := range s.players {
+		if p.dead || p.gameMode != 0 {
+			continue
+		}
+		d2 := segmentBoxDist2(e.px, e.py, e.pz, e.x, e.y, e.z, p.x, p.y, p.z)
+		if d2 < bestD2 {
+			bestD2 = d2
+			best = p
+		}
+	}
+	s.mu.Unlock()
+	if best != nil && bestD2 < 0.45*0.45 {
+		e.pendingHit = best.id
+		e.stuck = true
+	}
+}
+
+// segmentBoxDist2 returns the squared distance between the segment
+// (x1,y1,z1)-(x2,y2,z2) and the player body box (0.6 wide, 1.8 tall,
+// feet at bx/by/bz).
+func segmentBoxDist2(x1, y1, z1, x2, y2, z2, bx, by, bz float64) float64 {
+	dx, dy, dz := x2-x1, y2-y1, z2-z1
+	length2 := dx*dx + dy*dy + dz*dz
+	t := closestSegmentParam(x1, y1, z1, dx, dy, dz, length2, bx, by, bz)
+	cx, cy, cz := x1+dx*t, y1+dy*t, z1+dz*t
+	// Expand the box by the arrow radius, then clamp the point in.
+	px := clampF(cx, bx-0.3, bx+0.3)
+	py := clampF(cy, by, by+1.8)
+	pz := clampF(cz, bz-0.3, bz+0.3)
+	ex, ey, ez := cx-px, cy-py, cz-pz
+	return ex*ex + ey*ey + ez*ez
+}
+
+// closestSegmentParam finds the segment parameter t in [0,1] minimizing
+// the distance to the box center line (players are tall; testing against
+// the vertical center axis handles body hits without a full SAT solve).
+func closestSegmentParam(x1, y1, z1, dx, dy, dz, length2, bx, by, bz float64) float64 {
+	// Target the player's mid-body (by + 0.9) as a point.
+	tx, ty, tz := bx, by+0.9, bz
+	t := ((tx-x1)*dx + (ty-y1)*dy + (tz-z1)*dz) / length2
+	if t < 0 {
+		t = 0
+	}
+	if t > 1 {
+		t = 1
+	}
+	return t
+}
+
+func clampF(v, lo, hi float64) float64 {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
+
+// consumeHits applies deferred arrow hits. Runs on the ticker goroutine
+// after the tick loop, under s.mu.
+func (s *Server) consumeArrowHits() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, e := range s.entities {
+		a, ok := e.(*arrowEntity)
+		if !ok {
+			continue
+		}
+		a.mu.Lock()
+		hit := a.pendingHit
+		a.pendingHit = 0
+		speed := math.Sqrt(a.vx*a.vx + a.vy*a.vy + a.vz*a.vz)
+		ax, az := a.x, a.z
+		a.mu.Unlock()
+		if hit == 0 {
+			continue
+		}
+		var victim *player
+		for _, p := range s.players {
+			if p.id == hit {
+				victim = p
+				break
+			}
+		}
+		if victim == nil || victim.dead || victim.gameMode != 0 {
+			continue
+		}
+		dmg := float32(math.Ceil(speed * arrowBaseDamage))
+		if dmg < 1 {
+			dmg = 1
+		}
+		s.damagePlayerLocked(victim, dmg, v776.DamageTypeArrow, a.shooter, a.id)
+		// Knockback along the arrow's travel direction.
+		dx := victim.x - ax
+		dz := victim.z - az
+		d := math.Sqrt(dx*dx + dz*dz)
+		var kx float64
+		if d > 0.001 {
+			kx = dx / d * mobKnockbackH
+			kz := dz / d * mobKnockbackH
+			kb := protocol.NewWriter()
+			kb.VarInt(v776.PacketPlaySetEntityMotion)
+			java.WriteSetEntityMotion(kb, victim.id, kx, 0.35, kz)
+			_ = victim.conn.sendPacket(kb.Bytes())
+		}
+	}
+}
+
+// encodeArrowSpawn writes the add_entity payload for an arrow, carrying
+// the launch velocity so the client can free-simulate between server
+// corrections.
+func encodeArrowSpawn(w *protocol.Writer, a *arrowEntity) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	java.WriteAddEntity(w, a.id, a.uuid, a.typeID(), a.x, a.y, a.z,
+		a.vx, a.vy, a.vz,
+		angleByte(a.pitch), angleByte(a.yaw), angleByte(a.yaw), 0)
+}

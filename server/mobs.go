@@ -28,6 +28,7 @@ type mobDef struct {
 	height    float64
 	maxHealth float32
 	speed     float64 // wander target speed, blocks per tick
+	hostile   bool    // M9: zombie/skeleton/creeper chase brains
 	drops     []mobDrop
 }
 
@@ -81,7 +82,7 @@ func angleByte(deg float32) byte {
 	return byte(int32(deg*256.0/360.0) & 0xFF)
 }
 
-// mobEntity is one passive animal.
+// mobEntity is one animal or hostile monster.
 type mobEntity struct {
 	mu                  sync.Mutex
 	def                 *mobDef
@@ -97,6 +98,23 @@ type mobEntity struct {
 	walking    bool
 	panicTicks int32 // flee straight after being hurt
 
+	// M9 hostile state (zombie/skeleton/creeper chase brains).
+	targetID           int32   // snapshot of the chased player's entity id
+	tx, ty, tz         float64 // target position snapshot (1 tick stale)
+	dayLight           bool    // sunlight snapshot from the pre-pass
+	attackCD           int32   // melee swing cooldown
+	shootCD            int32   // arrow cooldown
+	swell              int32   // creeper fuse progress 0..30
+	swellDir           int32   // creeper metadata: -1 decay, +1 priming
+	wasPrimed          bool    // fuse sound played for this charge
+	fireTicks          int32   // sunburn timer, visual + damage
+	fireDmgCounter     int32   // ticks since the last burn damage
+	pendingMelee       bool    // intents consumed by the ticker
+	pendingShoot       bool
+	pendingExplode     bool
+	pendingFireDmg     bool
+	pendingPrimedSound bool
+
 	deathTicks int32 // >0 while the fall-over animation plays
 
 	blocked bool // horizontal collision flag for the hop logic
@@ -104,6 +122,7 @@ type mobEntity struct {
 	fallDistance   float32
 	pendingFallDmg float32 // consumed by tickEntities after tick()
 
+	metaDirty   bool
 	nx, ny, nz  float64
 	hasNet      bool
 	nyaw, nhead float32
@@ -127,6 +146,7 @@ func newMobEntity(def *mobDef, id int32, x, y, z float64) *mobEntity {
 		yaw:       rand.Float32() * 360,
 		health:    def.maxHealth,
 		moveTimer: int32(rand.Intn(60)),
+		swellDir:  -1, // creeper idle metadata
 	}
 }
 
@@ -137,8 +157,16 @@ func (m *mobEntity) alive() bool {
 	defer m.mu.Unlock()
 	return !m.removed
 }
-func (m *mobEntity) metadataDirty() bool { return false }
-func (m *mobEntity) clearMetadataDirty() {}
+func (m *mobEntity) metadataDirty() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.metaDirty
+}
+func (m *mobEntity) clearMetadataDirty() {
+	m.mu.Lock()
+	m.metaDirty = false
+	m.mu.Unlock()
+}
 func (m *mobEntity) xPos() (float64, float64, float64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -207,21 +235,12 @@ func (m *mobEntity) tick(s *Server) {
 
 	h := m.def.height
 
-	// Wander brain: alternate between strolling and standing.
-	m.moveTimer--
-	if m.moveTimer <= 0 {
-		if m.panicTicks <= 0 && rand.Intn(100) < 55 {
-			m.walking = false
-			m.moveTimer = int32(30 + rand.Intn(80))
-		} else {
-			m.walking = true
-			m.yaw = rand.Float32() * 360
-			m.moveTimer = int32(20 + rand.Intn(50))
-		}
-	}
-	if m.panicTicks > 0 {
-		m.panicTicks--
-		m.walking = true
+	// Brain: hostiles chase players via the pre-pass snapshot; passive
+	// animals alternate between strolling and standing.
+	if m.def.hostile {
+		m.hostileBrain()
+	} else {
+		m.wanderBrain()
 	}
 
 	// Speed scales up while fleeing.
@@ -314,6 +333,26 @@ func (m *mobEntity) tick(s *Server) {
 	m.pitch = 0
 }
 
+// wanderBrain is the passive idle brain: alternate between strolling and
+// standing. Caller holds m.mu.
+func (m *mobEntity) wanderBrain() {
+	m.moveTimer--
+	if m.moveTimer <= 0 {
+		if m.panicTicks <= 0 && rand.Intn(100) < 55 {
+			m.walking = false
+			m.moveTimer = int32(30 + rand.Intn(80))
+		} else {
+			m.walking = true
+			m.yaw = rand.Float32() * 360
+			m.moveTimer = int32(20 + rand.Intn(50))
+		}
+	}
+	if m.panicTicks > 0 {
+		m.panicTicks--
+		m.walking = true
+	}
+}
+
 // hurt applies player melee damage: knockback, hurt feedback and death.
 // Caller holds Server.mu.
 func (s *Server) hurtMobLocked(m *mobEntity, attacker *player, dmg float32) {
@@ -338,11 +377,21 @@ func (s *Server) hurtMobLocked(m *mobEntity, attacker *player, dmg float32) {
 		m.ground = false
 	}
 
-	// Panic away from the attacker for ~3 seconds.
-	m.panicTicks = 60
-	m.walking = true
+	// Panic away from the attacker for ~3 seconds (animals only: hostiles
+	// retaliate instead, and their nearest-player pre-pass already re-targets
+	// the attacker).
+	if !m.def.hostile {
+		m.panicTicks = 60
+		m.walking = true
+	}
 	if d > 0.001 {
 		m.yaw = float32(math.Atan2(-dx, dz) * 180 / math.Pi)
+	}
+
+	sound, hasSound := mobSound[m.def.name]
+	if hasSound {
+		s.broadcastSoundLocked(sound[0], mobSource(m.def.name),
+			float32(m.x), float32(m.y+float64(m.def.height)/2), float32(m.z), 1.0, randomPitch())
 	}
 
 	// Damage feedback to everyone tracking the mob (and the attacker).
@@ -364,6 +413,8 @@ func (s *Server) hurtMobLocked(m *mobEntity, attacker *player, dmg float32) {
 		m.deathTicks = mobDeathAnimTicks
 		m.walking = false
 		m.vx, m.vy, m.vz = 0, 0, 0
+		m.fireTicks = 0
+		m.metaDirty = true
 		eventBody := protocol.NewWriter()
 		eventBody.VarInt(v776.PacketPlayEntityEvent)
 		java.WriteEntityEvent(eventBody, m.id, 3)
@@ -371,6 +422,64 @@ func (s *Server) hurtMobLocked(m *mobEntity, attacker *player, dmg float32) {
 			if p.seenEnt[m.id] || p.id == attacker.id {
 				_ = p.conn.sendPacket(eventBody.Bytes())
 			}
+		}
+		if hasSound {
+			s.broadcastSoundLocked(sound[1], mobSource(m.def.name),
+				float32(m.x), float32(m.y+float64(m.def.height)/2), float32(m.z), 1.0, randomPitch())
+		}
+		s.dropMobLootLocked(m)
+	}
+}
+
+// damageMobLocked applies any server-side damage (fire, explosions).
+// Caller holds Server.mu; the mob mutex is taken and released inside.
+func (s *Server) damageMobLocked(m *mobEntity, dmg float32, dmgType int32, cause, direct int32) {
+	m.mu.Lock()
+	if m.deathTicks > 0 || m.removed || dmg <= 0 {
+		m.mu.Unlock()
+		return
+	}
+	m.health -= dmg
+	dying := false
+	if m.health <= 0 {
+		dying = true
+		m.deathTicks = mobDeathAnimTicks
+		m.walking = false
+		m.vx, m.vy, m.vz = 0, 0, 0
+	}
+	if dmgType == v776.DamageTypeOnFire || dying {
+		m.fireTicks = 0
+	}
+	m.metaDirty = true
+	mx, my, mz := m.x, m.y, m.z
+	seen := make([]*player, 0, len(s.players))
+	for _, p := range s.players {
+		if p.seenEnt[m.id] {
+			seen = append(seen, p)
+		}
+	}
+	m.mu.Unlock()
+
+	body := protocol.NewWriter()
+	body.VarInt(v776.PacketPlayDamageEvent)
+	java.WriteDamageEvent(body, m.id, dmgType, cause, direct)
+	hurtBody := protocol.NewWriter()
+	hurtBody.VarInt(v776.PacketPlayHurtAnimation)
+	java.WriteHurtAnimation(hurtBody, m.id, 0)
+	for _, p := range seen {
+		_ = p.conn.sendPacket(body.Bytes())
+		_ = p.conn.sendPacket(hurtBody.Bytes())
+	}
+	if dying {
+		eventBody := protocol.NewWriter()
+		eventBody.VarInt(v776.PacketPlayEntityEvent)
+		java.WriteEntityEvent(eventBody, m.id, 3)
+		for _, p := range seen {
+			_ = p.conn.sendPacket(eventBody.Bytes())
+		}
+		if sound, ok := mobSound[m.def.name]; ok {
+			s.broadcastSoundLocked(sound[1], mobSource(m.def.name),
+				float32(mx), float32(my+float64(m.def.height)/2), float32(mz), 1.0, randomPitch())
 		}
 		s.dropMobLootLocked(m)
 	}
@@ -444,6 +553,30 @@ func (s *Server) surfaceY(x, z int) int32 {
 		}
 	}
 	return -60
+}
+
+// writeMobMetadata encodes the set_entity_data frame for a mob: the
+// shared flags byte (on fire) and, for creepers, the swell direction the
+// client animates. Indices follow the 26.2 defineId declaration order
+// (see the constants in v776).
+func writeMobMetadata(w *protocol.Writer, m *mobEntity) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	w.VarInt(v776.PacketPlaySetEntityData)
+	w.VarInt(m.id)
+	flags := byte(0)
+	if m.fireTicks > 0 {
+		flags |= v776.EntityFlagOnFire
+	}
+	w.Byte(v776.MetaIndexEntityFlags)
+	w.VarInt(v776.MetaSerializerByte)
+	w.Byte(flags)
+	if m.def.hostile && m.def.name == "creeper" {
+		w.Byte(v776.MetaIndexCreeperSwell)
+		w.VarInt(v776.MetaSerializerVarInt)
+		w.VarInt(m.swellDir)
+	}
+	w.Byte(0xFF) // end of metadata list
 }
 
 // encodeMobSpawn writes the add_entity payload for a mob.

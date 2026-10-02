@@ -290,12 +290,15 @@ func (c *conn) startPlay() error {
 		return err
 	}
 
-	// World clock sync: overworld clock at tick 0, rate 1.0.
+	// World clock sync: overworld clock at the live server time, rate 1.0.
+	c.s.mu.Lock()
+	gameTime := c.s.timeTicks
+	c.s.mu.Unlock()
 	c.wr.Reset()
 	c.wr.VarInt(v776.PacketPlaySetTime)
-	java.WritePlaySetTime(c.wr, 0, []java.ClockState{{
+	java.WritePlaySetTime(c.wr, gameTime, []java.ClockState{{
 		ClockID:     c.s.world.clockID("overworld"),
-		TotalTicks:  0,
+		TotalTicks:  gameTime,
 		PartialTick: 0,
 		Rate:        1.0,
 	}})
@@ -325,7 +328,9 @@ func (c *conn) sendSpawnChunks() error {
 
 // handleMove applies a movement packet to the player model. M3 trusts the
 // client fully (no anti-cheat); crossing chunk borders triggers the
-// incremental chunk sync (new sends + unload notifications).
+// incremental chunk sync (new sends + unload notifications). The state
+// mutation runs under s.mu: the ticker (entity sync, survival) and other
+// connections' goroutines read these fields concurrently.
 func (c *conn) handleMove(packetID int32) error {
 	move, err := java.ReadPlayMove(c.rd, packetID)
 	if err != nil {
@@ -336,6 +341,7 @@ func (c *conn) handleMove(packetID int32) error {
 		return nil
 	}
 	moved := false
+	c.s.mu.Lock()
 	prevX, prevY, prevZ := p.x, p.y, p.z
 	if move.HasPos {
 		p.x, p.y, p.z = move.X, move.Y, move.Z
@@ -349,7 +355,7 @@ func (c *conn) handleMove(packetID int32) error {
 		}
 		// M8 survival: landing damage + movement exhaustion. Fall distance
 		// accumulates for every gamemode but only survival pays.
-		c.s.moveFallDamage(p, prevY, move.Y, move.OnGround)
+		c.s.moveFallDamageLocked(p, prevY, move.Y, move.OnGround)
 		p.moveExhaustion(move.X-prevX, move.Z-prevZ)
 	}
 	// Every move variant (including status-only) carries the ground flag;
@@ -358,6 +364,7 @@ func (c *conn) handleMove(packetID int32) error {
 	if move.HasRot {
 		p.yaw, p.pitch = move.Yaw, move.Pitch
 	}
+	c.s.mu.Unlock()
 	if moved && p.chunksSent {
 		// Only re-sync when the chunk actually changed.
 		return c.syncChunks()

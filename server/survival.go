@@ -180,6 +180,8 @@ func (s *Server) damagePlayerLocked(p *player, amount float32, dmgType int32, ca
 	_ = p.conn.sendDamageEvent(p.id, dmgType, cause, direct)
 	_ = p.conn.sendHurtAnimation(p.id, p.yaw)
 	p.sendHealth()
+	s.broadcastSoundLocked("minecraft:entity.player.hurt", v776.SoundSourcePlayers,
+		float32(p.x), float32(p.y+0.9), float32(p.z), 1.0, randomPitch())
 }
 
 // killPlayerLocked finishes off a player: death screen, inventory drop,
@@ -231,6 +233,14 @@ func deathMessage(dmgType int32) string {
 		name = "在墙里窒息而亡"
 	case v776.DamageTypeFreeze:
 		name = "被冻死了"
+	case v776.DamageTypeMobAttack:
+		name = "被怪物杀死了"
+	case v776.DamageTypeArrow:
+		name = "被箭射死了"
+	case v776.DamageTypeExplosion:
+		name = "被炸死了"
+	case v776.DamageTypeOnFire, v776.DamageTypeInFire:
+		name = "被烧死了"
 	}
 	return fmt.Sprintf("玩家%s", name)
 }
@@ -367,14 +377,15 @@ func (s *Server) tickSurvival(p *player) {
 
 // --- movement-driven survival ----------------------------------------------
 
-// moveFallDamage accumulates fall distance from a movement packet and
-// applies the landing hit. Called from the connection goroutine.
-func (s *Server) moveFallDamage(p *player, prevY, newY float64, onGround bool) {
+// moveFallDamageLocked accumulates fall distance from a movement packet
+// and applies the landing hit. Called from the connection goroutine with
+// s.mu already held (movement state and the ticker share these fields).
+func (s *Server) moveFallDamageLocked(p *player, prevY, newY float64, onGround bool) {
 	if onGround {
 		if p.fallDistance > fallSafeDistance {
 			dmg := float32(math.Floor(float64(p.fallDistance - fallSafeDistance)))
 			if dmg > 0 {
-				s.damagePlayer(p, dmg, v776.DamageTypeFall, -1, -1)
+				s.damagePlayerLocked(p, dmg, v776.DamageTypeFall, -1, -1)
 			}
 		}
 		p.fallDistance = 0
@@ -386,6 +397,7 @@ func (s *Server) moveFallDamage(p *player, prevY, newY float64, onGround bool) {
 }
 
 // moveExhaustion charges the movement cost of one movement packet.
+// Caller holds s.mu (sprinting flag and exhaustion are tick-shared).
 func (p *player) moveExhaustion(dx, dz float64) {
 	dist := math.Sqrt(dx*dx + dz*dz)
 	if p.sprinting {

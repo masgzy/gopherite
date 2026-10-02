@@ -31,18 +31,51 @@ func (s *Server) tickEntities() {
 	}
 	s.mu.Unlock()
 
+	// M9: snapshot targets/daylight into hostile mobs before they tick
+	// (the brains must not take Server.mu themselves).
+	s.prepareMobTicks()
+
 	for _, e := range ids {
 		e.tick(s)
 		if m, ok := e.(*mobEntity); ok {
 			m.mu.Lock()
 			dmg := m.pendingFallDmg
 			m.pendingFallDmg = 0
+			melee, shoot, explode, fireDmg, primed := m.pendingMelee, m.pendingShoot, m.pendingExplode, m.pendingFireDmg, m.pendingPrimedSound
+			m.pendingMelee, m.pendingShoot, m.pendingExplode, m.pendingFireDmg, m.pendingPrimedSound = false, false, false, false, false
 			m.mu.Unlock()
 			if dmg > 0 {
 				s.mobFallDamage(m, dmg)
 			}
+			if fireDmg || melee || shoot || explode || primed {
+				// All hostile intents mutate server state: run them
+				// under s.mu (their contracts; no mob lock held here).
+				s.mu.Lock()
+				if fireDmg {
+					s.damageMobLocked(m, 1, v776.DamageTypeOnFire, -1, -1)
+				}
+				if melee {
+					s.hostileMeleeLocked(m)
+				}
+				if shoot {
+					s.skeletonShootLocked(m)
+				}
+				if primed {
+					mx, my, mz := m.x, m.y, m.z
+					s.broadcastSoundLocked("minecraft:entity.creeper.primed", v776.SoundSourceHostile,
+						float32(mx), float32(my+0.5), float32(mz), 1.0, 0.5)
+				}
+				if explode {
+					s.explodeCreeperLocked(m)
+				}
+				s.mu.Unlock()
+			}
 		}
 	}
+
+	// M9: arrow hits resolve after the tick loop on the ticker's lock
+	// order (s.mu -> arrow.mu inside consumeArrowHits).
+	s.consumeArrowHits()
 
 	s.mu.Lock()
 	var dead []int32

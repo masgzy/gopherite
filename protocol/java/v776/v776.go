@@ -154,6 +154,8 @@ const (
 	PacketPlayOpenScreen       = 0x3B
 	PacketPlaySetCursorItem    = 0x60
 	PacketPlaySetTime          = 0x71
+	PacketPlaySound            = 0x75
+	PacketPlayExplode          = 0x24
 	PacketPlaySystemChat       = 0x79
 	PacketPlayTabList          = 0x7A
 	PacketPlayUpdateTags       = 0x86
@@ -181,13 +183,17 @@ const (
 
 // Entity type registry ids (protocol_id from reports/registries.json).
 const (
-	EntityTypeXPOrb   = 49  // minecraft:experience_orb
-	EntityTypeItem    = 71  // minecraft:item
-	EntityTypePlayer  = 156 // minecraft:player
-	EntityTypeChicken = 26  // minecraft:chicken
-	EntityTypeCow     = 30  // minecraft:cow
-	EntityTypePig     = 100 // minecraft:pig
-	EntityTypeSheep   = 111 // minecraft:sheep
+	EntityTypeXPOrb    = 49  // minecraft:experience_orb
+	EntityTypeItem     = 71  // minecraft:item
+	EntityTypePlayer   = 156 // minecraft:player
+	EntityTypeChicken  = 26  // minecraft:chicken
+	EntityTypeCow      = 30  // minecraft:cow
+	EntityTypePig      = 100 // minecraft:pig
+	EntityTypeSheep    = 111 // minecraft:sheep
+	EntityTypeZombie   = 151 // minecraft:zombie
+	EntityTypeSkeleton = 115 // minecraft:skeleton
+	EntityTypeCreeper  = 32  // minecraft:creeper
+	EntityTypeArrow    = 6   // minecraft:arrow
 )
 
 // Attribute registry ids (protocol_id from reports/registries.json).
@@ -212,4 +218,43 @@ const (
 	DamageTypeOutOfWorld  = 32 // minecraft:out_of_world
 	DamageTypePlayerAtk   = 34 // minecraft:player_attack
 	DamageTypeStarve      = 40 // minecraft:starve
+	// M9 hostile mobs.
+	DamageTypeArrow     = 0  // minecraft:arrow
+	DamageTypeExplosion = 9  // minecraft:explosion
+	DamageTypeMobAttack = 28 // minecraft:mob_attack
+	DamageTypeInFire    = 21 // minecraft:in_fire
+	DamageTypeOnFire    = 31 // minecraft:on_fire
+)
+
+// SoundSource enum ordinals (net.minecraft.sounds.SoundSource order).
+const (
+	SoundSourceMaster  = 0
+	SoundSourceMusic   = 1
+	SoundSourceRecords = 2
+	SoundSourceWeather = 3
+	SoundSourceBlocks  = 4
+	SoundSourceHostile = 5
+	SoundSourceNeutral = 6
+	SoundSourcePlayers = 7
+	SoundSourceAmbient = 8
+	SoundSourceVoice   = 9
+)
+
+// Entity metadata serializer ordinals (net.minecraft.network.syncher
+// EntityDataSerializers registration order, stable since 1.13).
+const (
+	MetaSerializerByte   = 0
+	MetaSerializerVarInt = 1
+	MetaSerializerFloat  = 3
+	MetaSerializerBool   = 8
+)
+
+// Entity metadata indices used by M9. Index 0 is Entity.DATA_FLAGS for
+// every entity (bit 0x01 = on fire); 16 is Creeper.DATA_SWELL_DIR. Both
+// verified against the 26.2 SynchedEntityData.defineId declaration order
+// (Entity 0-7, LivingEntity 8-14, Mob 15, Creeper 16-18).
+const (
+	MetaIndexEntityFlags  = 0
+	MetaIndexCreeperSwell = 16
+	EntityFlagOnFire      = 0x01
 )

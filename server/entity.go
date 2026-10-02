@@ -410,6 +410,8 @@ func (s *Server) encodeSpawn(w *protocol.Writer, e entity) {
 		java.WriteAddEntity(w, it.id, it.uuid, it.typeID(), it.x, it.y, it.z, 0, 0, 0, 0, 0, 0, 1)
 	case *mobEntity:
 		encodeMobSpawn(w, it)
+	case *arrowEntity:
+		encodeArrowSpawn(w, it)
 	case *xpOrbEntity:
 		java.WriteAddEntity(w, it.id, it.uuid, it.typeID(), it.x, it.y, it.z, 0, 0, 0, 0, 0, 0, 0)
 	default:
@@ -419,10 +421,14 @@ func (s *Server) encodeSpawn(w *protocol.Writer, e entity) {
 }
 
 // encodeMetadata writes the per-type metadata packet for freshly tracked
-// players (items: their stack, so the client can render them).
+// players (items: their stack, so the client can render them; mobs: the
+// fire flags and creeper swell state).
 func (s *Server) encodeMetadata(w *protocol.Writer, e entity) {
 	if it, ok := e.(*itemEntity); ok {
 		w.VarInt(v776.PacketPlaySetEntityData)
 		java.WriteSetEntityDataItem(w, it.id, it.itemID, it.count)
+	}
+	if m, ok := e.(*mobEntity); ok {
+		writeMobMetadata(w, m)
 	}
 }

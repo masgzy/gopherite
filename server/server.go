@@ -211,11 +211,21 @@ func (s *Server) tickOnce() {
 		_ = s.advanceMining(p)
 	}
 
+	// M9: advance the overworld clock (day/night) and re-sync clients.
+	s.tickTime()
+
 	// M5: entity ticks (item physics, pickup) + tracker reconciliation.
 	s.tickEntities()
 
 	// M8: survival ticks (hunger, regen, void, eating) for every player.
-	for _, p := range s.playerListLocked() {
+	// Snapshot under the lock: tickSurvival re-locks internally.
+	s.mu.Lock()
+	players := make([]*player, 0, len(s.players))
+	for _, p := range s.players {
+		players = append(players, p)
+	}
+	s.mu.Unlock()
+	for _, p := range players {
 		s.tickSurvival(p)
 	}
 
@@ -223,11 +233,18 @@ func (s *Server) tickOnce() {
 	// worlds only — tests construct focused entity sets).
 	if s.opts.LevelName != "" && s.tickCount%400 == 0 {
 		s.topUpMobs()
+		// M9: hostiles spawn in the dark on the same cadence.
+		s.topUpHostiles()
 	}
 
 	s.stats.record(time.Since(start), time.Now())
+	// tickCount is read under s.mu by combat cooldowns and /time,
+	// so the increment joins the same lock.
+	s.mu.Lock()
 	s.tickCount++
-	if s.tickCount%20 == 0 {
+	refreshBars := s.tickCount%20 == 0
+	s.mu.Unlock()
+	if refreshBars {
 		s.refreshTpsbars(bars)
 	}
 }

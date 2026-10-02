@@ -140,7 +140,13 @@ configDone:
 			// phase sees the starter herd's packets.
 			v776.PacketPlayAddEntity, v776.PacketPlaySetEntityMotion,
 			v776.PacketPlayMoveEntityPos, v776.PacketPlayMoveEntityPosRot,
-			v776.PacketPlayRotateHead, v776.PacketPlayEntityEvent:
+			v776.PacketPlayRotateHead, v776.PacketPlayEntityEvent,
+			// M9: mobs now carry a metadata frame (fire flags / creeper
+			// swell) right after their add_entity.
+			v776.PacketPlaySetEntityData,
+			// M9: hurt/death/explosion sounds reach the bot whenever the
+			// starter world has hostile activity.
+			v776.PacketPlaySound, v776.PacketPlayExplode:
 			continue
 		default:
 			t.Fatalf("unexpected packet 0x%x while joining", id)
