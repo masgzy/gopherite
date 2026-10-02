@@ -225,6 +225,9 @@ func (c *conn) startPlay() error {
 	// Starter hotbar (per-slot inventory sync).
 	c.sendStarterInventory()
 
+	// M12: sync the current weather so the newcomer sees the same sky.
+	c.sendWeather()
+
 	// Full inventory-menu state (vanilla sendAllDataToRemote on initMenu).
 	p.invMenu.sendAll(c)
 

@@ -414,6 +414,15 @@ func (s *Server) encodeSpawn(w *protocol.Writer, e entity) {
 		encodeArrowSpawn(w, it)
 	case *xpOrbEntity:
 		java.WriteAddEntity(w, it.id, it.uuid, it.typeID(), it.x, it.y, it.z, 0, 0, 0, 0, 0, 0, 0)
+	case *tntEntity:
+		// vanilla primed_tnt: spawn data carries the remaining fuse.
+		it.mu.Lock()
+		fuse, x, y, z := it.fuse, it.x, it.y, it.z
+		it.mu.Unlock()
+		java.WriteAddEntity(w, it.id, it.uuid, it.typeID(), x, y, z, 0, 0, 0, 0, 0, 0, fuse)
+	case *lightningEntity:
+		// 闪电无初始速度与 data，客户端自行播放闪烁。
+		java.WriteAddEntity(w, it.id, it.uuid, it.typeID(), it.x, it.y, it.z, 0, 0, 0, 0, 0, 0, 0)
 	default:
 		// future types plug in here
 		java.WriteAddEntity(w, e.entityID(), [16]byte{}, e.typeID(), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)

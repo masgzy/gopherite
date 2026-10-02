@@ -383,7 +383,7 @@ func (c *conn) handleClientCommand() error {
 	p.foodTickTimer = 0
 	p.fallDistance = 0
 	p.eatTicksLeft = 0
-	p.x, p.y, p.z = 0.5, float64(s.surfaceY(0, 0)), 0.5
+	respawnPositionLocked(s, p)
 	p.cx, p.cz = 0, 0
 	p.onGround = true
 	p.sendHealth()

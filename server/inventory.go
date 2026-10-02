@@ -3,6 +3,7 @@ package server
 import (
 	"log"
 	"math"
+	"strings"
 	"sync"
 
 	"github.com/masgzy/gopherite/internal/ui"
@@ -192,6 +193,22 @@ func (c *conn) placeBlock(u java.ServerboundUseItemOn) {
 			c.s.toggleLever(int(u.X), int(u.Y), int(u.Z))
 			c.s.mu.Unlock()
 			return
+		case "minecraft:tnt":
+			// M12: 打火石点燃 TNT（不潜行）；其他物品落入下方放置流程。
+			if p.heldSlot >= 0 && p.heldSlot < int32(len(p.slots)) &&
+				itemNameOf(p.slots[p.heldSlot].item) == "minecraft:flint_and_steel" {
+				c.s.mu.Lock()
+				c.s.igniteTNTLocked(int(u.X), int(u.Y), int(u.Z), p.id, 0)
+				c.s.mu.Unlock()
+				return
+			}
+		}
+		if strings.HasSuffix(name, "_bed") {
+			// M12: 床交互（不潜行时）——睡觉或提示。
+			c.s.mu.Lock()
+			c.interactBed(int(u.X), int(u.Y), int(u.Z))
+			c.s.mu.Unlock()
+			return
 		}
 	}
 	held := p.slots[p.heldSlot]
@@ -200,6 +217,11 @@ func (c *conn) placeBlock(u java.ServerboundUseItemOn) {
 	}
 	block, ok := itemBlockName[itemNameOf(held.item)]
 	if !ok {
+		return
+	}
+	// M12: 床放置走两格路径（foot 在目标格，head 在玩家朝向方向）。
+	if strings.HasSuffix(block, "_bed") {
+		c.placeBedAndConsume(block, u, held)
 		return
 	}
 	state := defaultStateOf(block)

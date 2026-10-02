@@ -42,7 +42,10 @@ func expectNoise(b *botConn, want int32) *protocol.Reader {
 			// M9 background traffic: clock resyncs, sounds and the
 			// explosion packet can interleave anywhere.
 			v776.PacketPlaySetTime, v776.PacketPlaySound,
-			v776.PacketPlayExplode:
+			v776.PacketPlayExplode,
+			// M12 background: weather game events (join snapshot and
+			// ticker-driven transitions).
+			v776.PacketPlayGameEvent:
 			continue
 		default:
 			b.t.Fatalf("want packet 0x%x, got 0x%x", want, id)

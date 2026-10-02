@@ -72,6 +72,10 @@ type player struct {
 	// Server.mu (ticker entity sync touches it).
 	seenEnt map[int32]bool
 
+	// M12 重生点（床）；内存态，重启后回世界出生点。
+	spawnX, spawnY, spawnZ float64
+	hasSpawn               bool
+
 	// seenPlayers tracks which OTHER players this client sees (M8.5);
 	// psX..psPitch is the per-tick move baseline for this player's own
 	// broadcasts. Guarded by Server.mu.

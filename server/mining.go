@@ -2,6 +2,7 @@ package server
 
 import (
 	"log"
+	"strings"
 
 	"github.com/masgzy/gopherite/internal/ui"
 	"github.com/masgzy/gopherite/protocol"
@@ -220,6 +221,12 @@ func (s *Server) breakBlock(breaker *player, x, y, z int) {
 		return
 	}
 	s.broadcastBlockUpdate(int32(x), int32(y), int32(z), stateAir)
+	// M12: 床破坏联动——另一半静默清除，掉落只走主格一次。
+	if name := blockNameOf(int(dropped)); strings.HasSuffix(name, "_bed") {
+		s.mu.Lock()
+		s.breakBed(x, y, z, dropped)
+		s.mu.Unlock()
+	}
 	s.spawnBlockDrop(x, y, z, dropped)
 	if isComponent(blockNameOf(int(dropped))) {
 		s.redstoneUpdate(x, y, z)

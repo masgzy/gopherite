@@ -185,17 +185,19 @@ const (
 
 // Entity type registry ids (protocol_id from reports/registries.json).
 const (
-	EntityTypeXPOrb    = 49  // minecraft:experience_orb
-	EntityTypeItem     = 71  // minecraft:item
-	EntityTypePlayer   = 156 // minecraft:player
-	EntityTypeChicken  = 26  // minecraft:chicken
-	EntityTypeCow      = 30  // minecraft:cow
-	EntityTypePig      = 100 // minecraft:pig
-	EntityTypeSheep    = 111 // minecraft:sheep
-	EntityTypeZombie   = 151 // minecraft:zombie
-	EntityTypeSkeleton = 115 // minecraft:skeleton
-	EntityTypeCreeper  = 32  // minecraft:creeper
-	EntityTypeArrow    = 6   // minecraft:arrow
+	EntityTypeXPOrb         = 49  // minecraft:experience_orb
+	EntityTypeItem          = 71  // minecraft:item
+	EntityTypePlayer        = 156 // minecraft:player
+	EntityTypeChicken       = 26  // minecraft:chicken
+	EntityTypeCow           = 30  // minecraft:cow
+	EntityTypePig           = 100 // minecraft:pig
+	EntityTypeSheep         = 111 // minecraft:sheep
+	EntityTypeZombie        = 151 // minecraft:zombie
+	EntityTypeSkeleton      = 115 // minecraft:skeleton
+	EntityTypeCreeper       = 32  // minecraft:creeper
+	EntityTypeArrow         = 6   // minecraft:arrow
+	EntityTypeTNT           = 133 // minecraft:tnt（26.2 registry_data.json 权威值）
+	EntityTypeLightningBolt = 77  // minecraft:lightning_bolt
 )
 
 // Attribute registry ids (protocol_id from reports/registries.json).

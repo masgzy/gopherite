@@ -622,6 +622,10 @@ configDone:
 		case v776.PacketPlayGameEvent:
 			ev, _ := rr.Byte()
 			_, _ = rr.Float()
+			if ev == 2 || ev == 1 || ev == 7 || ev == 9 {
+				// M12 天气同步帧（join 快照）：跳过后继续等 spawn 信号。
+				continue
+			}
 			if ev != 13 { // LEVEL_CHUNKS_LOAD_START
 				t.Fatalf("game event: %d", ev)
 			}

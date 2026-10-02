@@ -73,6 +73,9 @@ func (s *Server) tickEntities() {
 		}
 	}
 
+	// M12: primed TNT explosions resolve on the ticker's lock order.
+	s.resolveTNTIntents()
+
 	// M9: arrow hits resolve after the tick loop on the ticker's lock
 	// order (s.mu -> arrow.mu inside consumeArrowHits).
 	s.consumeArrowHits()

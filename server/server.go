@@ -136,6 +136,11 @@ type Server struct {
 
 	// gc 是智能 GC 调控器；nil 表示未启用（GCTuning=false 或测试）。
 	gc *gcTuner
+
+	// M12 天气：全局状态与剩余 ticks（guarded by mu，ticker 专用写）。
+	weather           int32 // weatherClear / weatherRain / weatherThunder
+	weatherTicks      int64
+	lastLoggedWeather int32
 }
 
 // playerListLocked returns the joined players; caller holds mu.
@@ -229,6 +234,9 @@ func (s *Server) tickOnce() {
 
 	// M9: advance the overworld clock (day/night) and re-sync clients.
 	s.tickTime()
+
+	// M12: advance the weather state machine (rain/thunder/lightning).
+	s.tickWeather()
 
 	// M5: entity ticks (item physics, pickup) + tracker reconciliation.
 	s.tickEntities()
