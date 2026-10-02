@@ -23,6 +23,16 @@ func (w *world) enableSaving(dir string) {
 	w.loadAll()
 }
 
+// drainPendingBEs hands the loaded block entities to the Server registry
+// (called once after the startup replay).
+func (w *world) drainPendingBEs() map[[3]int]*blockEntity {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	out := w.pendingBEs
+	w.pendingBEs = make(map[[3]int]*blockEntity)
+	return out
+}
+
 // loadAll reads every region file under <saveDir>/region and rebuilds the
 // stored chunks. A damaged chunk skips without failing the rest: a world
 // that half-loads still plays.
@@ -56,9 +66,12 @@ func (w *world) loadAll() {
 			}
 			cx := rx*32 + int32(idx%32)
 			cz := rz*32 + int32(idx/32)
-			c := chunkFromNBT(cx, cz, root)
+			c, ents := chunkFromNBT(cx, cz, root)
 			w.chunks[[2]int32{cx, cz}] = c
 			w.persisted[[2]int32{cx, cz}] = true
+			for _, b := range ents {
+				w.pendingBEs[b.posKey()] = b
+			}
 			loaded++
 		}
 	}
@@ -90,18 +103,19 @@ func (w *world) collectDirty() [][2]int32 {
 	return keys
 }
 
-// saveDirty persists every chunk modified since the last save. Regions are
-// rewritten whole: each .mca file regenerates from its in-memory chunk set
-// so sector tables never go stale. On failure the dirty set is restored so
-// the next cadence tick retries.
-func (w *world) saveDirty() error {
+// saveDirty persists every chunk modified since the last save. bes maps
+// chunk keys to their container block entity snapshots (from the Server).
+// Regions are rewritten whole: each .mca file regenerates from its
+// in-memory chunk set so sector tables never go stale. On failure the
+// dirty set is restored so the next cadence tick retries.
+func (w *world) saveDirty(bes map[[2]int32][]*blockEntity) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	keys := w.collectDirty()
 	if len(keys) == 0 {
 		return nil
 	}
-	if err := w.saveKeysLocked(keys); err != nil {
+	if err := w.saveKeysLocked(keys, bes); err != nil {
 		for _, k := range keys {
 			w.dirty[k] = true
 		}
@@ -112,7 +126,7 @@ func (w *world) saveDirty() error {
 
 // saveAll flushes every chunk that is on disk or diverged from the
 // generator (shutdown path).
-func (w *world) saveAll() error {
+func (w *world) saveAll(bes map[[2]int32][]*blockEntity) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	all := make(map[[2]int32]bool, len(w.persisted)+len(w.dirty))
@@ -126,13 +140,13 @@ func (w *world) saveAll() error {
 	for k := range all {
 		keys = append(keys, k)
 	}
-	return w.saveKeysLocked(keys)
+	return w.saveKeysLocked(keys, bes)
 }
 
 // saveKeysLocked serialises the given chunks into their region files.
-// Callers hold w.mu. Dirty flags clear and the persisted set grows as
-// chunks land on disk.
-func (w *world) saveKeysLocked(keys [][2]int32) error {
+// Callers hold w.mu. bes carries the per-chunk block entity snapshots.
+// Dirty flags clear and the persisted set grows as chunks land on disk.
+func (w *world) saveKeysLocked(keys [][2]int32, bes map[[2]int32][]*blockEntity) error {
 	now := time.Now().Unix()
 	// Group by region: one full .mca rewrite per touched region.
 	regions := make(map[[2]int32]map[int][]byte)
@@ -149,7 +163,7 @@ func (w *world) saveKeysLocked(keys [][2]int32) error {
 			regions[[2]int32{rx, rz}] = m
 		}
 		var buf protocol.Writer
-		java.WriteNbtFile(&buf, nbtChunk(c))
+		java.WriteNbtFile(&buf, nbtChunk(c, bes[key]))
 		m[localChunkIndex(key[0], key[1])] = zlibEncode(buf.Bytes())
 		delete(w.dirty, key)
 	}
@@ -159,6 +173,41 @@ func (w *world) saveKeysLocked(keys [][2]int32) error {
 		}
 	}
 	return nil
+}
+
+// blockEntitySnapshot deep-copies the container block entities grouped by
+// chunk so the save goroutine never races live tick state. Caller holds
+// Server.mu.
+func (s *Server) blockEntitySnapshot() map[[2]int32][]*blockEntity {
+	out := make(map[[2]int32][]*blockEntity)
+	for _, b := range s.blockEnts {
+		copyB := *b
+		copyB.slots = append([]invSlot(nil), b.slots...)
+		key := [2]int32{int32(b.x >> 4), int32(b.z >> 4)}
+		out[key] = append(out[key], &copyB)
+	}
+	return out
+}
+
+// saveDirtyWorld snapshots block entities and flushes dirty chunks
+// (autosave cadence).
+func (s *Server) saveDirtyWorld() error {
+	if s.opts.LevelName == "" {
+		return nil
+	}
+	s.mu.Lock()
+	bes := s.blockEntitySnapshot()
+	s.mu.Unlock()
+	return s.world.saveDirty(bes)
+}
+
+// saveAllWorld is the shutdown flush: every persisted or diverged chunk
+// plus the final block entity state.
+func (s *Server) saveAllWorld() error {
+	s.mu.Lock()
+	bes := s.blockEntitySnapshot()
+	s.mu.Unlock()
+	return s.world.saveAll(bes)
 }
 
 // autosaveLoop flushes dirty chunks every 5 seconds until shutdown,
@@ -175,7 +224,7 @@ func (s *Server) autosaveLoop() {
 				if s.closing.Load() {
 					return
 				}
-				if err := s.world.saveDirty(); err != nil {
+				if err := s.saveDirtyWorld(); err != nil {
 					log.Printf(ui.Warn("警告")+"自动保存失败: %v", err)
 				}
 			case <-s.stop:

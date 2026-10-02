@@ -19,14 +19,20 @@ type world struct {
 	saveDir   string            // empty disables saving
 	persisted map[[2]int32]bool // chunks on disk (loaded or saved)
 	dirty     map[[2]int32]bool // chunks needing a save
+
+	// pendingBEs collects container block entities decoded during the
+	// load-on-start replay (M10); the Server drains it into its own
+	// registry after enableSaving.
+	pendingBEs map[[3]int]*blockEntity
 }
 
 func newWorld(seed int64) *world {
 	return &world{
-		seed:      seed,
-		chunks:    make(map[[2]int32]*chunk),
-		persisted: make(map[[2]int32]bool),
-		dirty:     make(map[[2]int32]bool),
+		seed:       seed,
+		chunks:     make(map[[2]int32]*chunk),
+		persisted:  make(map[[2]int32]bool),
+		dirty:      make(map[[2]int32]bool),
+		pendingBEs: make(map[[3]int]*blockEntity),
 	}
 }
 

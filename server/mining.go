@@ -203,9 +203,14 @@ func (s *Server) advanceMining(p *player) error {
 
 // breakBlock replaces a block with air, broadcasts the change to every
 // player that can see the chunk and spawns the block's drop as an item
-// entity (M5).
+// entity (M5). Container block entities spill their contents first (M10).
 func (s *Server) breakBlock(breaker *player, x, y, z int) {
 	dropped := s.world.getBlock(x, y, z)
+	s.mu.Lock()
+	if b := s.blockEntsAt(x, y, z); b != nil {
+		s.removeBlockEntity(b)
+	}
+	s.mu.Unlock()
 	if !s.world.setBlock(x, y, z, stateAir) {
 		return
 	}

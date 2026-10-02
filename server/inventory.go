@@ -2,6 +2,7 @@ package server
 
 import (
 	"log"
+	"math"
 	"sync"
 
 	"github.com/masgzy/gopherite/internal/ui"
@@ -119,6 +120,23 @@ var faceOffset = [6][3]int{
 	{1, 0, 0},  // east
 }
 
+// facingFromYaw maps the player look yaw to the horizontal facing a
+// placed container block gets: vanilla blocks face the player, i.e. the
+// opposite of the look direction (yaw 0 = looking south).
+func facingFromYaw(yaw float32) string {
+	seg := int(math.Floor(float64(yaw)/90 + 0.5))
+	switch ((seg % 4) + 4) % 4 {
+	case 1:
+		return "east" // looking west
+	case 2:
+		return "south" // looking north
+	case 3:
+		return "west" // looking east
+	default:
+		return "north" // looking south
+	}
+}
+
 // itemNamesByID is the reverse of itemIDByName, built lazily once.
 var (
 	nameOnce      sync.Once
@@ -145,18 +163,31 @@ func (c *conn) placeBlock(u java.ServerboundUseItemOn) {
 	if p == nil || p.heldSlot < 0 || p.heldSlot >= int32(len(p.slots)) {
 		return
 	}
-	// Interact blocks first: a crafting table opens its 3x3 grid menu
-	// and a lever flips (unless the player sneaks to place against it).
+	// Interact blocks first: a crafting table opens its 3x3 grid menu,
+	// chests and furnaces open their block-entity menus and a lever
+	// flips (unless the player sneaks to place against it).
 	if !p.sneaking {
 		state := c.s.world.getBlock(int(u.X), int(u.Y), int(u.Z))
 		name := blockNameOf(int(state))
-		if name == "minecraft:crafting_table" {
+		switch name {
+		case "minecraft:crafting_table":
 			c.s.mu.Lock()
 			c.openCrafting()
 			c.s.mu.Unlock()
 			return
-		}
-		if name == "minecraft:lever" {
+		case "minecraft:chest":
+			c.s.mu.Lock()
+			b := c.s.ensureBlockEntity(beChest, int(u.X), int(u.Y), int(u.Z))
+			c.openChest(b)
+			c.s.mu.Unlock()
+			return
+		case "minecraft:furnace":
+			c.s.mu.Lock()
+			b := c.s.ensureBlockEntity(beFurnace, int(u.X), int(u.Y), int(u.Z))
+			c.openFurnace(b)
+			c.s.mu.Unlock()
+			return
+		case "minecraft:lever":
 			c.s.mu.Lock()
 			c.s.toggleLever(int(u.X), int(u.Y), int(u.Z))
 			c.s.mu.Unlock()
@@ -175,6 +206,19 @@ func (c *conn) placeBlock(u java.ServerboundUseItemOn) {
 	if state < 0 {
 		return
 	}
+	// Containers face the player; vanilla property sets must match
+	// exactly for the state lookup.
+	isContainer := block == "minecraft:chest" || block == "minecraft:furnace"
+	if isContainer {
+		props := blockPropsOf(state)
+		props["facing"] = facingFromYaw(p.yaw)
+		if block == "minecraft:chest" {
+			props["type"] = "single"
+		}
+		if sid := stateIDOf(block, props); sid > 0 {
+			state = int(sid)
+		}
+	}
 	if u.Face < 0 || int(u.Face) >= len(faceOffset) {
 		return
 	}
@@ -185,6 +229,15 @@ func (c *conn) placeBlock(u java.ServerboundUseItemOn) {
 	}
 	if !c.s.world.setBlock(x, y, z, int32(state)) {
 		return
+	}
+	if isContainer {
+		c.s.mu.Lock()
+		if block == "minecraft:chest" {
+			c.s.ensureBlockEntity(beChest, x, y, z)
+		} else {
+			c.s.ensureBlockEntity(beFurnace, x, y, z)
+		}
+		c.s.mu.Unlock()
 	}
 	held.count--
 	p.slots[p.heldSlot] = held

@@ -113,13 +113,16 @@ func TestChunkNbtRoundTrip(t *testing.T) {
 	}
 
 	var buf protocol.Writer
-	java.WriteNbtFile(&buf, nbtChunk(c))
+	java.WriteNbtFile(&buf, nbtChunk(c, nil))
 	root, err := java.ReadNbtFile(protocol.NewReader(buf.Bytes()))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	got := chunkFromNBT(3, -5, root)
+	got, ents := chunkFromNBT(3, -5, root)
+	if len(ents) != 0 {
+		t.Fatalf("unexpected block entities: %d", len(ents))
+	}
 	if got.getBlock(4, -59, 7) != stateStone {
 		t.Fatalf("placed block lost: %d", got.getBlock(4, -59, 7))
 	}
@@ -164,7 +167,7 @@ func TestWorldPersistRoundTrip(t *testing.T) {
 	if w1.setBlock(-20, -62, 30, stateAir) != true { // mine cross-chunk
 		t.Fatal("mine failed")
 	}
-	if err := w1.saveAll(); err != nil {
+	if err := w1.saveAll(nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -206,7 +209,7 @@ func TestWorldPersistRoundTrip(t *testing.T) {
 	if w2.setBlock(9, -58, 9, stateDirt) != true {
 		t.Fatal("post-reload place failed")
 	}
-	if err := w2.saveAll(); err != nil {
+	if err := w2.saveAll(nil); err != nil {
 		t.Fatal(err)
 	}
 	w3 := newWorld(0)
@@ -225,7 +228,7 @@ func TestSaveDirLazy(t *testing.T) {
 	dir := t.TempDir()
 	w := newWorld(0)
 	w.enableSaving(dir)
-	if err := w.saveDirty(); err != nil {
+	if err := w.saveDirty(nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "region")); !os.IsNotExist(err) {

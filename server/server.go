@@ -118,6 +118,10 @@ type Server struct {
 	// entities holds every live tracked entity (M5); guarded by mu.
 	entities map[int32]entity
 
+	// blockEnts holds the placed container block entities (M10: chest,
+	// furnace); guarded by mu like the rest of the model.
+	blockEnts map[[3]int]*blockEntity
+
 	// nextEntityID is the vanilla entity id counter; players included.
 	nextEntityID atomic.Int32
 }
@@ -217,6 +221,11 @@ func (s *Server) tickOnce() {
 	// M5: entity ticks (item physics, pickup) + tracker reconciliation.
 	s.tickEntities()
 
+	// M10: furnace block entities (burn, cook, lit state, progress push).
+	s.mu.Lock()
+	s.tickBlockEntities()
+	s.mu.Unlock()
+
 	// M8: survival ticks (hunger, regen, void, eating) for every player.
 	// Snapshot under the lock: tickSurvival re-locks internally.
 	s.mu.Lock()
@@ -263,11 +272,16 @@ func New(opts Options) (*Server, error) {
 	if opts.ViewDistance <= 0 {
 		opts.ViewDistance = 8
 	}
-	s := &Server{opts: opts, world: newWorld(0), players: make(map[*conn]*player), entities: make(map[int32]entity), stop: make(chan struct{}), started: make(chan struct{})}
+	s := &Server{opts: opts, world: newWorld(0), players: make(map[*conn]*player), entities: make(map[int32]entity), blockEnts: make(map[[3]int]*blockEntity), stop: make(chan struct{}), started: make(chan struct{})}
 	s.nextEntityID.Store(0) // first allocEntityID() yields 1, matching tests
 	if opts.LevelName != "" {
 		// M4: replay persisted chunks before accepting connections.
 		s.world.enableSaving(opts.LevelName)
+		// M10: take over the container block entities decoded during the
+		// replay so chests/furnaces keep their contents across restarts.
+		for k, b := range s.world.drainPendingBEs() {
+			s.blockEnts[k] = b
+		}
 	}
 	if f, err := loadFaviconDataURI(opts.FaviconPath); err != nil {
 		// A broken icon must not keep the server offline: log it and go
@@ -363,22 +377,17 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	}()
 	select {
 	case <-done:
-		s.flushWorld()
+		if err := s.saveAllWorld(); err != nil {
+			log.Printf(ui.Error("X ")+"关停保存失败: %v", err)
+		}
 		return nil
 	case <-ctx.Done():
-		go s.flushWorld()
+		go func() {
+			if err := s.saveAllWorld(); err != nil {
+				log.Printf(ui.Error("X ")+"关停保存失败: %v", err)
+			}
+		}()
 		return ctx.Err()
-	}
-}
-
-// flushWorld performs the final persistence sweep after all connection
-// goroutines have drained, so no writes race the save.
-func (s *Server) flushWorld() {
-	if s.opts.LevelName == "" {
-		return
-	}
-	if err := s.world.saveAll(); err != nil {
-		log.Printf(ui.Error("X ")+"关停保存失败: %v", err)
 	}
 }
 

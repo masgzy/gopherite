@@ -88,6 +88,12 @@ func (c *conn) handlePlay() error {
 		return c.handleCommand(cmd)
 	case v776.PacketPlaySBCarriedItem:
 		return c.handleSetCarriedItem()
+	case v776.PacketPlaySBContainerClick:
+		// M10: the M7 click state machine was never wired into the
+		// dispatch switch — container clicks were silently dropped.
+		return c.handleContainerClick()
+	case v776.PacketPlaySBContainerClose:
+		return c.handleContainerClose()
 	case v776.PacketPlaySwing:
 		// Arm swing: no entity animation broadcast yet (M3+).
 		return nil
@@ -127,6 +133,11 @@ func (c *conn) startPlay() error {
 		barUUID:  newBarUUID(),
 
 		invMenu: newInventoryMenu(),
+
+		// Window ids start at 1: container 0 is the always-open
+		// inventory menu (fixes the M7 zero-value collision that
+		// handed transient menus id 0).
+		nextWindowID: 1,
 
 		// Survival baseline: full vitals on first spawn.
 		health:     maxHealth,

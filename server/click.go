@@ -41,6 +41,26 @@ func (c *conn) handleContainerClick() error {
 	}
 	m.doClick(p, c, int(click.Slot), int(click.Button), int(click.Input))
 	m.sendAll(c)
+	if m.be != nil {
+		// Container edits mark the owning chunk dirty for the autosave.
+		c.s.world.markDirty(int32(m.be.x>>4), int32(m.be.z>>4))
+	}
+	return nil
+}
+
+// handleContainerClose applies the client's window close (Esc / E key):
+// crafting grids return to the inventory, block-entity slots stay in the
+// chest/furnace. notify=false — the client initiated the close.
+func (c *conn) handleContainerClose() error {
+	windowID, err := java.ReadContainerClose(c.rd)
+	if err != nil {
+		return err
+	}
+	c.s.mu.Lock()
+	defer c.s.mu.Unlock()
+	if c.player != nil {
+		c.closeMenu(windowID, false)
+	}
 	return nil
 }
 
@@ -82,16 +102,30 @@ func (m *menu) doClick(p *player, c *conn, slot, button, input int) {
 	}
 }
 
-// afterSlotChange recomputes the crafting result when a grid cell moved.
+// afterSlotChange applies the per-menu post-click hook: crafting menus
+// recompute the result, furnaces reset the cook timer when the
+// ingredient item changed and bank smelting XP once the result stack is
+// taken away.
 func (m *menu) afterSlotChange(p *player, slot int) {
-	gridTouched := slot == 0
-	if m.kind == menuInventory {
-		gridTouched = slot >= 1 && slot <= 4
-	} else {
-		gridTouched = slot >= 1 && slot <= 9
-	}
-	if gridTouched {
-		m.refreshResult()
+	switch m.kind {
+	case menuInventory:
+		if slot >= 1 && slot <= 4 {
+			m.refreshResult()
+		}
+	case menuCrafting:
+		if slot >= 1 && slot <= 9 {
+			m.refreshResult()
+		}
+	case menuFurnace:
+		switch slot {
+		case 0:
+			resetFurnaceInput(m.be)
+		case 2:
+			if m.be.slots[2].count <= 0 {
+				c := p.conn
+				c.s.settleFurnaceXP(m.be)
+			}
+		}
 	}
 }
 
@@ -118,7 +152,9 @@ func (m *menu) doPickup(p *player, c *conn, slot, button int) {
 	clicked := m.get(p, slot)
 	carried := m.carried
 
-	// Result slot: crafting take (vanilla ResultSlot behaviour).
+	// Result slot: crafting take (vanilla ResultSlot behaviour); the
+	// furnace result was already produced by the block tick, so taking it
+	// consumes nothing.
 	if m.isResultSlot(slot) {
 		if clicked.count <= 0 || carried.count > 0 && carried.item != clicked.item {
 			return
@@ -130,7 +166,11 @@ func (m *menu) doPickup(p *player, c *conn, slot, button int) {
 		if carried.count > 0 && carried.count+take.count > itemMaxStack {
 			return
 		}
-		m.craftConsume(p)
+		if m.kind != menuFurnace {
+			m.craftConsume(p)
+		} else {
+			m.be.slots[2] = invSlot{}
+		}
 		if carried.count == 0 {
 			m.carried = take
 		} else {
@@ -229,7 +269,28 @@ func (m *menu) doQuickMove(p *player, c *conn, slot int) {
 	if slot < 0 || slot >= m.slotCount() {
 		return
 	}
+	// Result slot: crafting loops the take while the output keeps moving;
+	// the furnace result just shifts into the inventory once.
 	if m.isResultSlot(slot) {
+		if m.kind == menuFurnace {
+			res := m.be.slots[2]
+			if res.count > 0 {
+				left := p.giveItem(res.item, res.count)
+				if left < res.count {
+					res.count -= left
+					if res.count == 0 {
+						m.be.slots[2] = invSlot{}
+					} else {
+						m.be.slots[2] = res
+					}
+					if left > 0 {
+						c.s.spawnPlayerDrop(p, res.item, left)
+					}
+				}
+			}
+			m.afterSlotChange(p, slot)
+			return
+		}
 		// Craft into the inventory while a result exists and fits.
 		for it := 0; it < 64; it++ {
 			res := m.result
@@ -266,30 +327,67 @@ func (m *menu) doQuickMove(p *player, c *conn, slot int) {
 // returns the part that stayed in the source slot.
 func (m *menu) quickMove(p *player, slot int, s invSlot) invSlot {
 	// Ranges in wire-slot space: main and hotbar per menu.
-	var mainLo, mainHi, hotLo, hotHi int // [lo, hi)
-	if m.kind == menuInventory {
-		mainLo, mainHi, hotLo, hotHi = 9, 36, 36, 45
-	} else {
-		mainLo, mainHi, hotLo, hotHi = 10, 37, 37, 46
-	}
-	switch {
-	case slot == 0: // handled by caller
-		return s
-	case slot >= 1 && slot < (func() int {
-		if m.kind == menuInventory {
-			return 9
+	switch m.kind {
+	case menuInventory:
+		switch {
+		case slot == 0:
+			return s
+		case slot >= 1 && slot < 9: // grid -> inventory
+			return m.moveRange(p, s, 9, 36, false)
+		case slot >= 9 && slot < 36:
+			return m.moveRange(p, s, 36, 45, false)
+		case slot >= 36 && slot < 45:
+			return m.moveRange(p, s, 9, 36, false)
+		default: // offhand -> main
+			return m.moveRange(p, s, 9, 36, false)
 		}
-		return 10
-	})():
-		// Grid cell -> inventory.
-		return m.moveRange(p, s, mainLo, mainHi, false)
-	case slot >= mainLo && slot < mainHi:
-		return m.moveRange(p, s, hotLo, hotHi, false)
-	case slot >= hotLo && slot < hotHi:
-		return m.moveRange(p, s, mainLo, mainHi, false)
-	default:
-		return m.moveRange(p, s, mainLo, mainHi, false)
+	case menuChest:
+		switch {
+		case slot < 27: // chest grid -> inventory
+			return m.moveRange(p, s, 27, 63, false)
+		default: // inventory -> chest grid
+			return m.moveRange(p, s, 0, 27, false)
+		}
+	case menuFurnace:
+		switch {
+		case slot == 2: // result -> inventory
+			return m.moveRange(p, s, 3, 39, false)
+		case slot == 0 || slot == 1: // ingredient/fuel -> inventory
+			return m.moveRange(p, s, 3, 39, false)
+		default: // inventory: smeltable first, then fuel, else move row
+			return m.quickMoveFurnaceInv(p, slot, s)
+		}
+	default: // crafting
+		switch {
+		case slot == 0:
+			return s
+		case slot >= 1 && slot < 10: // grid -> inventory
+			return m.moveRange(p, s, 10, 37, false)
+		case slot >= 10 && slot < 37:
+			return m.moveRange(p, s, 37, 46, false)
+		case slot >= 37 && slot < 46:
+			return m.moveRange(p, s, 10, 37, false)
+		}
+		return s
 	}
+}
+
+// quickMoveFurnaceInv implements the vanilla AbstractFurnaceMenu routing
+// for stacks coming from the player inventory: can-smelt goes to the
+// ingredient slot, fuels go to the fuel slot, everything else swaps
+// between the main and hotbar rows. Wire slots: 0 ingredient, 1 fuel,
+// 2 result, 3-29 main, 30-38 hotbar.
+func (m *menu) quickMoveFurnaceInv(p *player, slot int, s invSlot) invSlot {
+	if _, ok := smeltResultOf(s.item); ok {
+		return m.moveRange(p, s, 0, 1, false)
+	}
+	if fuelTicksOf(s.item) > 0 {
+		return m.moveRange(p, s, 1, 2, false)
+	}
+	if slot < 30 {
+		return m.moveRange(p, s, 30, 39, false)
+	}
+	return m.moveRange(p, s, 3, 30, false)
 }
 
 // moveRange inserts s into the wire-slot range [lo, hi); hotbar

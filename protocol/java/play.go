@@ -698,6 +698,15 @@ func WriteContainerClose(w *protocol.Writer, containerID int32) {
 	w.VarInt(containerID)
 }
 
+// WriteContainerSetData pushes one window data slot (furnace burn/cook
+// progress): container id VarInt, then the property index and value as
+// shorts (26.2 ClientboundContainerSetDataPacket).
+func WriteContainerSetData(w *protocol.Writer, containerID int32, id, value int16) {
+	w.VarInt(containerID)
+	w.Uint16(uint16(id))
+	w.Uint16(uint16(value))
+}
+
 // WriteSetCursorItem pushes the carried (cursor) stack.
 func WriteSetCursorItem(w *protocol.Writer, s ItemStack) {
 	writeOptionalStack(w, s)

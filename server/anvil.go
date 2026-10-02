@@ -138,6 +138,86 @@ func nbtPaletteEntry(id int32) java.NbtAny {
 	return java.NbtAny{Type: java.TagCompound, Comp: entry}
 }
 
+// ---- block entity <-> NBT (M10) ----
+//
+// Container block entities use the 26.2 (1.21.5+) snake_case disk format
+// so vanilla clients and tools read our worlds unchanged:
+//
+//      {id: "minecraft:chest", pos: [x,y,z],
+//       Items: [{slot: byte, id: "minecraft:item", count: int}]}
+//      furnaces add cooking_time_spent / cooking_total_time /
+//      lit_time_remaining / lit_total_time shorts.
+
+// nbtBlockEntity serialises one container block entity.
+func nbtBlockEntity(b *blockEntity) *java.NbtComp {
+	root := java.NewNbtComp().
+		Set("id", java.NbtString(b.kind.id())).
+		Set("pos", java.NbtListOf(java.TagInt, []java.NbtAny{
+			java.NbtInt(int64(b.x)), java.NbtInt(int64(b.y)), java.NbtInt(int64(b.z)),
+		}))
+	items := make([]java.NbtAny, 0, len(b.slots))
+	for i, s := range b.slots {
+		if s.count <= 0 || s.item <= 0 {
+			continue
+		}
+		entry := java.NewNbtComp().
+			Set("slot", java.NbtByte(int64(i))).
+			Set("id", java.NbtString(itemNameOf(s.item))).
+			Set("count", java.NbtInt(int64(s.count)))
+		items = append(items, java.NbtAny{Type: java.TagCompound, Comp: entry})
+	}
+	root.Set("Items", java.NbtListOf(java.TagCompound, items))
+	if b.kind == beFurnace {
+		root.Set("cooking_time_spent", java.NbtShort(int64(b.cookingTimer))).
+			Set("cooking_total_time", java.NbtShort(int64(b.cookingTotalTime))).
+			Set("lit_time_remaining", java.NbtShort(int64(b.litTimeRemaining))).
+			Set("lit_total_time", java.NbtShort(int64(b.litTotalTime)))
+	}
+	return root
+}
+
+// blockEntityFromNBT decodes one container block entity; nil for
+// non-container or malformed entries (never fail the whole chunk).
+func blockEntityFromNBT(comp *java.NbtComp) *blockEntity {
+	id := comp.Get("id").Str
+	var kind beKind
+	switch id {
+	case "minecraft:chest":
+		kind = beChest
+	case "minecraft:furnace":
+		kind = beFurnace
+	default:
+		return nil
+	}
+	posList := comp.Get("pos").List
+	if len(posList) != 3 {
+		return nil
+	}
+	b := newBlockEntity(kind, int(posList[0].Num), int(posList[1].Num), int(posList[2].Num))
+	for _, iv := range comp.Get("Items").List {
+		entry := iv.Comp
+		if entry == nil {
+			continue
+		}
+		slot := int(entry.Get("slot").Num)
+		if slot < 0 || slot >= len(b.slots) {
+			continue
+		}
+		itemID, ok := itemIDByName[entry.Get("id").Str]
+		if !ok {
+			continue
+		}
+		b.slots[slot] = invSlot{item: itemID, count: int32(entry.Get("count").Num)}
+	}
+	if kind == beFurnace {
+		b.cookingTimer = int(comp.Get("cooking_time_spent").Num)
+		b.cookingTotalTime = int(comp.Get("cooking_total_time").Num)
+		b.litTimeRemaining = int(comp.Get("lit_time_remaining").Num)
+		b.litTotalTime = int(comp.Get("lit_total_time").Num)
+	}
+	return b
+}
+
 // ---- chunk -> NBT ----
 
 // nbtHeightmap packs one heightmap type (9 bits per cell, 256 cells).
@@ -151,8 +231,9 @@ func nbtHeightmap(c *chunk) []int64 {
 	return packSpanning(vals, 9)
 }
 
-// nbtChunk serialises a chunk column to its Anvil compound form.
-func nbtChunk(c *chunk) *java.NbtComp {
+// nbtChunk serialises a chunk column to its Anvil compound form. ents
+// carries the chunk's container block entities (M10).
+func nbtChunk(c *chunk, ents []*blockEntity) *java.NbtComp {
 	root := java.NewNbtComp().
 		Set("DataVersion", java.NbtInt(v776.WorldVersion)).
 		Set("xPos", java.NbtInt(int64(c.cx))).
@@ -204,7 +285,15 @@ func nbtChunk(c *chunk) *java.NbtComp {
 	// No light is stored: isLightOn=0 tells vanilla engines to relight on
 	// load, which matches our uniformly-lit sky model.
 	root.Set("isLightOn", java.NbtByte(0))
-	root.Set("BlockEntities", java.NbtEmptyList(java.TagCompound))
+	if len(ents) == 0 {
+		root.Set("BlockEntities", java.NbtEmptyList(java.TagCompound))
+	} else {
+		bes := make([]java.NbtAny, len(ents))
+		for i, b := range ents {
+			bes[i] = java.NbtAny{Type: java.TagCompound, Comp: nbtBlockEntity(b)}
+		}
+		root.Set("BlockEntities", java.NbtListOf(java.TagCompound, bes))
+	}
 	root.Set("structures", java.NbtAny{Type: java.TagCompound, Comp: java.NewNbtComp().
 		Set("References", java.NbtAny{Type: java.TagCompound, Comp: java.NewNbtComp()}).
 		Set("starts", java.NbtAny{Type: java.TagCompound, Comp: java.NewNbtComp()})})
@@ -214,9 +303,11 @@ func nbtChunk(c *chunk) *java.NbtComp {
 // ---- NBT -> chunk ----
 
 // chunkFromNBT rebuilds a chunk column from its Anvil compound. Sections
-// missing block_states load as air; unknown palette entries degrade to air.
-func chunkFromNBT(cx, cz int32, root *java.NbtComp) *chunk {
+// missing block_states load as air; unknown palette entries degrade to
+// air. Container block entities decode separately (second return).
+func chunkFromNBT(cx, cz int32, root *java.NbtComp) (*chunk, []*blockEntity) {
 	c := &chunk{cx: cx, cz: cz}
+	var ents []*blockEntity
 	for si := range c.sections {
 		c.sections[si] = newSection(stateAir)
 	}
@@ -256,7 +347,12 @@ func chunkFromNBT(cx, cz int32, root *java.NbtComp) *chunk {
 			c.sections[si] = newSpanSection(ids, vals)
 		}
 	}
-	return c
+	for _, bv := range root.Get("BlockEntities").List {
+		if b := blockEntityFromNBT(bv.Comp); b != nil {
+			ents = append(ents, b)
+		}
+	}
+	return c, ents
 }
 
 // newSpanSection rebuilds a linear section from disk values: the spanning

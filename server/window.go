@@ -2,15 +2,20 @@ package server
 
 // Container menus (M7). Every player owns a persistent inventory menu
 // (container id 0, vanilla InventoryMenu); right-clicking a crafting
-// table opens a transient CraftingMenu with a fresh window id.
+// table opens a transient CraftingMenu with a fresh window id. M10 adds
+// chest (3x9) and furnace menus backed by block entities.
 //
 // Wire slot layouts mirror the 26.2 vanilla menu classes:
 //
-//	InventoryMenu (46 slots): 0 result, 1-4 2x2 grid, 5-8 armor
-//	  (inv 39..36 = head/chest/legs/feet), 9-35 main (inv 9..35),
-//	  36-44 hotbar (inv 0..8), 45 offhand (inv 40).
-//	CraftingMenu (46 slots): 0 result, 1-9 3x3 grid, 10-36 main
-//	  (inv 9..35), 37-45 hotbar (inv 0..8).
+//      InventoryMenu (46 slots): 0 result, 1-4 2x2 grid, 5-8 armor
+//        (inv 39..36 = head/chest/legs/feet), 9-35 main (inv 9..35),
+//        36-44 hotbar (inv 0..8), 45 offhand (inv 40).
+//      CraftingMenu (46 slots): 0 result, 1-9 3x3 grid, 10-36 main
+//        (inv 9..35), 37-45 hotbar (inv 0..8).
+//      ChestMenu 3 rows (63 slots): 0-26 chest grid, 27-53 main
+//        (inv 9..35), 54-62 hotbar (inv 0..8).
+//      FurnaceMenu (39 slots): 0 ingredient, 1 fuel, 2 result, 3-29 main
+//        (inv 9..35), 30-38 hotbar (inv 0..8).
 
 import (
 	"github.com/masgzy/gopherite/protocol"
@@ -18,12 +23,20 @@ import (
 	"github.com/masgzy/gopherite/protocol/java/v776"
 )
 
-// menuKind discriminates the two menus implemented so far.
+// menuKind discriminates the implemented menus.
 type menuKind int
 
 const (
 	menuInventory menuKind = iota
 	menuCrafting
+	menuChest
+	menuFurnace
+)
+
+// menuTypeIDs are the vanilla menu registry ids (MenuType register order).
+const (
+	menuTypeChest9x3 = 2
+	menuTypeFurnace  = 14
 )
 
 // menu is the server-side state of one open container.
@@ -32,6 +45,10 @@ type menu struct {
 	id      int32
 	stateID int32
 	carried invSlot // cursor stack
+
+	// be backs chest/furnace menus: the block entity owns the wire
+	// slots before the player inventory range.
+	be *blockEntity
 
 	// grid holds the crafting cells (4 or 9); result the computed
 	// output of slot 0.
@@ -52,10 +69,54 @@ func newCraftingMenu(id int32) *menu {
 	return &menu{kind: menuCrafting, id: id, grid: make([]invSlot, 9)}
 }
 
-func (m *menu) slotCount() int { return 46 }
+func newChestMenu(id int32, b *blockEntity) *menu {
+	return &menu{kind: menuChest, id: id, be: b}
+}
+
+func newFurnaceMenu(id int32, b *blockEntity) *menu {
+	return &menu{kind: menuFurnace, id: id, be: b}
+}
+
+func (m *menu) slotCount() int {
+	switch m.kind {
+	case menuChest:
+		return 63
+	case menuFurnace:
+		return 39
+	default:
+		return 46
+	}
+}
+
+// beSlots resolves the block-entity-backed slot count of the menu (0 for
+// crafting menus). Everything before this boundary lives in the block.
+func (m *menu) beSlotCount() int {
+	switch m.kind {
+	case menuChest:
+		return 27
+	case menuFurnace:
+		return 3
+	default:
+		return 0
+	}
+}
 
 // get resolves one wire slot to its current stack.
 func (m *menu) get(p *player, i int) invSlot {
+	if n := m.beSlotCount(); n > 0 {
+		switch {
+		case m.kind == menuChest && i >= 0 && i < n:
+			return m.be.slots[i]
+		case m.kind == menuFurnace && i >= 0 && i < n:
+			return m.be.slots[i]
+		case i >= n && i < n+27: // main inventory (inv 9..35)
+			return p.slots[i-n+9]
+		case i >= n+27 && i < m.slotCount(): // hotbar (inv 0..8)
+			return p.slots[i-n-27]
+		default:
+			return invSlot{}
+		}
+	}
 	switch {
 	case i == 0:
 		return m.result
@@ -88,6 +149,17 @@ func (m *menu) get(p *player, i int) invSlot {
 
 // set stores one wire slot; unknown cells are ignored.
 func (m *menu) set(p *player, i int, s invSlot) {
+	if n := m.beSlotCount(); n > 0 {
+		switch {
+		case i >= 0 && i < n:
+			m.be.slots[i] = s
+		case i >= n && i < n+27:
+			p.slots[i-n+9] = s
+		case i >= n+27 && i < m.slotCount():
+			p.slots[i-n-27] = s
+		}
+		return
+	}
 	switch {
 	case i == 0:
 		m.result = s
@@ -120,8 +192,18 @@ func (m *menu) set(p *player, i int, s invSlot) {
 	}
 }
 
-// isResultSlot reports whether wire slot i is a crafting output.
-func (m *menu) isResultSlot(i int) bool { return i == 0 }
+// isResultSlot reports whether wire slot i is a take-only output: the
+// crafting results (0) and the furnace result (2). Chests have none.
+func (m *menu) isResultSlot(i int) bool {
+	switch m.kind {
+	case menuFurnace:
+		return i == 2
+	case menuChest:
+		return false
+	default:
+		return i == 0
+	}
+}
 
 // wireStack converts an invSlot into the protocol stack shape.
 func wireStack(s invSlot) java.ItemStack {
@@ -192,9 +274,47 @@ func (c *conn) openCrafting() {
 	m.sendAll(c)
 }
 
-// closeMenu returns grid + carried contents to the inventory (dropping
-// the overflow, vanilla clearContainer), notifies the client and falls
-// back to the inventory menu. Caller holds Server.mu.
+// openChest opens the 3x9 menu of the chest block entity. Caller holds
+// Server.mu.
+func (c *conn) openChest(b *blockEntity) {
+	p := c.player
+	m := newChestMenu(p.nextWindowID, b)
+	p.nextWindowID++
+	p.openMenu = m
+	body := protocol.NewWriter()
+	body.VarInt(v776.PacketPlayOpenScreen)
+	java.WriteOpenScreen(body, m.id, menuTypeChest9x3, "Chest") // minecraft:generic_9x3
+	_ = c.sendPacket(body.Bytes())
+	m.sendAll(c)
+}
+
+// openFurnace opens the furnace menu and seeds the client's progress
+// widgets with the four data slots (vanilla sendAllDataToRemote before
+// the initial content). Caller holds Server.mu.
+func (c *conn) openFurnace(b *blockEntity) {
+	p := c.player
+	m := newFurnaceMenu(p.nextWindowID, b)
+	p.nextWindowID++
+	p.openMenu = m
+	body := protocol.NewWriter()
+	body.VarInt(v776.PacketPlayOpenScreen)
+	java.WriteOpenScreen(body, m.id, menuTypeFurnace, "Furnace") // minecraft:furnace
+	_ = c.sendPacket(body.Bytes())
+	lit := b.litTimeRemaining
+	for i, v := range [4]int{lit, b.litTotalTime, b.cookingTimer, b.cookingTotalTime} {
+		b.lastData[i] = v
+		dbody := protocol.NewWriter()
+		dbody.VarInt(v776.PacketPlayContainerSetData)
+		java.WriteContainerSetData(dbody, m.id, int16(i), int16(v))
+		_ = c.sendPacket(dbody.Bytes())
+	}
+	m.sendAll(c)
+}
+
+// closeMenu returns crafting-grid + carried contents to the inventory
+// (dropping the overflow, vanilla clearContainer), notifies the client
+// and falls back to the inventory menu. Block-entity slots stay in the
+// chest/furnace. Caller holds Server.mu.
 func (c *conn) closeMenu(windowID int32, notify bool) {
 	p := c.player
 	m := p.openMenu

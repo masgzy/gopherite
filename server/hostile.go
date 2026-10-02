@@ -362,6 +362,11 @@ func (s *Server) explodeCreeperLocked(m *mobEntity) {
 				}
 				destroyed++
 				s.broadcastBlockUpdateLocked(int32(bx), int32(by), int32(bz), stateAir)
+				// Container block entities spill everything (vanilla
+				// explosions always drop chest/furnace contents).
+				if b := s.blockEnts[[3]int{bx, by, bz}]; b != nil {
+					s.removeBlockEntity(b)
+				}
 				if rand.Int31n(r) == 0 {
 					s.spawnExplosionDrop(bx, by, bz, st)
 				}

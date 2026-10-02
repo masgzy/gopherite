@@ -150,6 +150,8 @@ const (
 	PacketPlayCommands         = 0x10
 	PacketPlayCBContainerClose = 0x11
 	PacketPlayContainerContent = 0x12
+	// M10: furnace burn/cook progress push (Container Set Data).
+	PacketPlayContainerSetData = 0x13
 	PacketPlayContainerSetSlot = 0x14
 	PacketPlayOpenScreen       = 0x3B
 	PacketPlaySetCursorItem    = 0x60
