@@ -432,15 +432,23 @@ func ReadBlockPos(r *protocol.Reader) (int32, int32, int32, error) {
 	if err != nil {
 		return 0, 0, 0, err
 	}
+	// Vanilla BlockPos.asLong layout: X 26 bits @38, Z 12 bits @26,
+	// Y 26 bits @0 — each field sign-extended from its own width.
 	x := int32(v >> 38)
-	y := int32(v << 52 >> 52) // 12-bit signed
-	z := int32(v << 12 >> 38)
+	y := int32(v << 38 >> 38)
+	z := int32(v << 26 >> 52)
 	return x, y, z, nil
 }
 
 // WriteBlockPos packs a position the same way.
+// PackBlockPos packs block coordinates the vanilla way: X 26 bits @38,
+// Z 12 bits @26, Y 26 bits @0.
+func PackBlockPos(x, y, z int64) int64 {
+	return ((x & 0x3FFFFFF) << 38) | ((z & 0xFFF) << 26) | (y & 0x3FFFFFF)
+}
+
 func WriteBlockPos(w *protocol.Writer, x, y, z int32) {
-	w.Int64(int64(uint64(x&0x3FFFFFF)<<38 | uint64(z&0x3FFFFFF)<<12 | uint64(y&0xFFF)))
+	w.Int64(PackBlockPos(int64(x), int64(y), int64(z)))
 }
 
 // WriteBlockUpdate encodes the single block change packet.

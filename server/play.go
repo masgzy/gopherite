@@ -78,7 +78,7 @@ func (c *conn) startPlay() error {
 	p := &player{
 		conn:     c,
 		name:     c.username,
-		id:       1, // single-player milestone: entity id 1
+		id:       c.s.allocEntityID(),
 		x:        0.5,
 		y:        -60,
 		z:        0.5,
@@ -86,6 +86,7 @@ func (c *conn) startPlay() error {
 		pitch:    0,
 		radius:   radius,
 		seen:     make(map[[2]int32]bool),
+		seenEnt:  make(map[int32]bool),
 		onGround: true,
 		barUUID:  newBarUUID(),
 	}
@@ -198,7 +199,7 @@ func (c *conn) startPlay() error {
 	// Default spawn position: packed block pos (0, -60, 0).
 	c.wr.Reset()
 	c.wr.VarInt(v776.PacketPlaySpawnPosition)
-	java.WritePlaySpawnPosition(c.wr, "minecraft:overworld", packBlockPos(0, -60, 0), 0, 0)
+	java.WritePlaySpawnPosition(c.wr, "minecraft:overworld", java.PackBlockPos(0, -60, 0), 0, 0)
 	if err := c.sendPacket(c.wr.Bytes()); err != nil {
 		return err
 	}
@@ -299,11 +300,6 @@ func (c *conn) keepAliveLoop() {
 			return
 		}
 	}
-}
-
-// packBlockPos packs a block position into the vanilla long form.
-func packBlockPos(x, y, z int64) int64 {
-	return ((x & 0x3FFFFFF) << 38) | ((z & 0x3FFFFFF) << 12) | (y & 0xFFF)
 }
 
 // chunkCoord converts a world coordinate to a chunk coordinate.
