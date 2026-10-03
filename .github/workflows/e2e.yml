@@ -1,0 +1,151 @@
+name: E2E
+
+# 真实客户端端到端测试：headless 启动原版 Minecraft 26.2 客户端，
+# 通过官方 QuickPlay 参数加入 Gopherite，全部断言取自服务端日志。
+# 客户端方案：headlesshq/mc-runtime-test（内部基于 HeadlessMC 启动器，
+# Xvfb 虚拟显示 + dummy assets，无需 GPU 与正版账号）。
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    # 每日跑一次，及早发现 Mojang 客户端/库漂移。
+    - cron: '17 3 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  real-client:
+    name: Real Minecraft 26.2 client joins server
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      RUN_DIR: ${{ github.workspace }}/e2e-run
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+          check-latest: true
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Build server (single binary)
+        run: go build -trimpath -ldflags "-s -w -X main.version=${{ github.sha }}" -o dist/gopherite ./cmd/gopherite
+
+      - name: Prepare offline-mode run directory
+        run: |
+          mkdir -p "$RUN_DIR"
+          cat > "$RUN_DIR/server.properties" <<'EOF'
+          # E2E 专用配置：离线模式，客户端以离线会话直连。
+          server-port=25565
+          server-ip=127.0.0.1
+          motd=Gopherite E2E
+          max-players=5
+          online-mode=false
+          network-compression-threshold=256
+          view-distance=6
+          level-name=world
+          gc-tuning=true
+          EOF
+
+      - name: Start Gopherite in the background
+        run: |
+          nohup "$GITHUB_WORKSPACE/dist/gopherite" \
+            -config "$RUN_DIR/server.properties" \
+            -dir "$RUN_DIR" \
+            -accept-eula \
+            > "$RUN_DIR/server.log" 2>&1 &
+          for i in $(seq 1 60); do
+            grep -q "Done (" "$RUN_DIR/server.log" && {
+              echo "Gopherite 就绪"
+              exit 0
+            }
+            sleep 1
+          done
+          echo "Gopherite 没能在 60 秒内就绪:"
+          cat "$RUN_DIR/server.log"
+          exit 1
+
+      - name: Point the client at the server (vanilla QuickPlay)
+        # HeadlessMC 的 hmc.gameargs 会原样拼进游戏启动参数；
+        # MC 1.20+ 官方支持 --quickPlayMultiplayer <host>:<port> 直连服务器。
+        run: |
+          mkdir -p HeadlessMC
+          echo "hmc.gameargs=--quickPlayMultiplayer 127.0.0.1:25565" >> HeadlessMC/config.properties
+          cat HeadlessMC/config.properties
+
+      - name: Arm the session watcher
+        # 判定不在本步做：watcher 只负责让客户端在合适时机结束。
+        # 1) 日志出现"进入游戏"后再观察 25 秒（覆盖多轮 keepalive 与
+        #    客户端移动包），随后 SIGTERM 让客户端优雅退出（socket 走
+        #    正常关闭路径）；
+        # 2) 若 300 秒仍未 join，同样结束客户端，让判定步去失败。
+        run: |
+          cat > watcher.sh <<'EOF'
+          #!/bin/bash
+          finish() {
+            echo "watcher: 结束客户端进程"
+            pkill -TERM -f 'headlessmc-launcher' 2>/dev/null
+            pkill -TERM -f 'fabric' 2>/dev/null
+            pkill -TERM java 2>/dev/null
+          }
+          for i in $(seq 1 150); do
+            if grep -q "进入游戏" "$RUN_DIR/server.log" 2>/dev/null; then
+              echo "watcher: join 已确认，开始 25 秒存活观察"
+              sleep 25
+              finish
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "watcher: 300 秒内未确认 join"
+          finish
+          exit 0
+          EOF
+          chmod +x watcher.sh
+          nohup ./watcher.sh > "$RUN_DIR/watcher.log" 2>&1 &
+          disown
+          echo "watcher 已布防"
+
+      - name: Launch real Minecraft 26.2 client (headless)
+        # 不装 mc-runtime-test mod（它只会进单人世界）；客户端凭
+        # QuickPlay 参数直连 Gopherite。客户端最终被 watcher 终止，
+        # 本步退出码无关判定，成败由下一步的服务端日志断言决定。
+        continue-on-error: true
+        uses: headlesshq/mc-runtime-test@4.5.1
+        with:
+          mc: 26.2
+          modloader: fabric
+          regex: '.*fabric.*'
+          mc-runtime-test: none
+          java: 25
+          xvfb: 'true'
+          dummy-assets: 'true'
+          cache-mc: github
+
+      - name: Verify the session in server logs
+        run: |
+          log="$RUN_DIR/server.log"
+          echo "===== watcher ====="
+          cat "$RUN_DIR/watcher.log" 2>/dev/null || true
+          echo "===== Gopherite 日志尾部 ====="
+          tail -n 120 "$log"
+          echo "===== 断言 ====="
+          grep -q "正在登录（离线模式" "$log" || {
+            echo "FAIL: 客户端从未走到离线登录"; exit 1; }
+          grep -q "进入游戏" "$log" || {
+            echo "FAIL: 玩家从未进入游戏"; exit 1; }
+          grep -q "断开连接" "$log" || {
+            echo "FAIL: 连接没有正常收尾"; exit 1; }
+          if grep -q "会话异常\|写入失败\|Bad packet\|不支持的协议\|非法" "$log"; then
+            echo "FAIL: 服务端出现协议异常日志"; exit 1
+          fi
+          echo "PASS: 真实客户端 join → 存活观察 → 正常断开，全程无协议异常"
