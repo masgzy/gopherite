@@ -112,7 +112,9 @@ configDone:
 	b.write(pl.Bytes())
 
 	// Drain the spawn sequence + chunk batch until Batch Done.
-	b.nc.SetReadDeadline(time.Now().Add(10 * time.Second))
+	// joinLatencyBudget() lifts the deadline on shared CI runners where
+	// the VD8 batch legitimately exceeds the local 10s budget.
+	b.nc.SetReadDeadline(time.Now().Add(joinLatencyBudget()))
 	for {
 		id, rr := b.next()
 		switch id {
