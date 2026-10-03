@@ -127,6 +127,9 @@ func (s *Server) trySleepLocked(p *player, x, y, z int) string {
 	p.spawnX, p.spawnY, p.spawnZ = float64(x+hdx)+0.5, float64(y)+1, float64(z+hdz)+0.5
 	p.hasSpawn = true
 
+	// M17: slept_in_bed 触发（adventure 页 "Sweet Dreams"）。
+	s.advEventSlept(p)
+
 	// 跳过夜晚：把当日剩余时间一次性推到清晨 0 点。
 	t := s.timeOfDayLocked()
 	s.timeTicks += ticksPerDay - t

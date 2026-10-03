@@ -120,6 +120,22 @@ func (c *conn) handlePlay() error {
 	case v776.PacketPlaySBPong:
 		_, err := java.ReadPlayPong(c.rd)
 		return err
+	case v776.PacketPlaySBSeenAdvancements:
+		// M17: the client opened an advancement tab (closing the screen
+		// is ignored, mirroring vanilla handleSeenAdvancements).
+		action, tab, err := java.ReadSeenAdvancements(c.rd)
+		if err != nil {
+			return err
+		}
+		if action != 0 || c.player == nil {
+			return nil
+		}
+		c.s.mu.Lock()
+		defer c.s.mu.Unlock()
+		if c.player.adv != nil && c.s.advTree.defs[tab] != nil {
+			c.s.advSetSelectedTab(c.player.adv, c, tab)
+		}
+		return nil
 	}
 	// Unknown serverbound packets are skipped, mirroring vanilla: the
 	// client may send packet types this milestone does not implement yet
@@ -164,6 +180,18 @@ func (c *conn) startPlay() error {
 	}
 	c.player = p
 	c.s.addPlayer(p)
+
+	// M17: per-player advancement state — replay the saved progress file
+	// and hook every incomplete criterion the engine supports. The first
+	// sync packet rides on the next tick (vanilla doTick cadence: the
+	// tick trigger completes the roots, making the tree visible).
+	p.adv = newPlayerAdvancements(c.s.advTree)
+	c.s.mu.Lock()
+	c.s.advLoad(p.adv, c.profileID)
+	for _, id := range p.adv.tree.order {
+		p.adv.registerListeners(id)
+	}
+	c.s.mu.Unlock()
 
 	c.wr.Reset()
 	c.wr.VarInt(v776.PacketPlayLogin)

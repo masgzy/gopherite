@@ -305,6 +305,10 @@ func (s *Server) damagePlayerLocked(p *player, amount float32, dmgType int32, ca
 	}
 	p.eatTicksLeft = 0 // pain interrupts eating
 	p.usingBow = false // pain interrupts drawing a bow
+	// M17: entity_hurt_player / entity_killed_player（实体来源的伤害）。
+	if name := advEntityNameOfID(s, direct); name != "" {
+		s.advEventPlayerHurt(p, name)
+	}
 	if p.health <= 0 {
 		// M16: 死亡计分钩子（vanilla LivingEntity.die 的 scoreboard 段）：
 		// 死亡者 deathCount +1；凶手是玩家则 playerKillCount +1，否则
@@ -315,6 +319,9 @@ func (s *Server) damagePlayerLocked(p *player, amount float32, dmgType int32, ca
 			sb.bumpCriteriaLocked(p.name, "playerKillCount", 1)
 		} else {
 			sb.bumpCriteriaLocked(p.name, "totalKillCount", 1)
+		}
+		if name := advEntityNameOfID(s, direct); name != "" {
+			s.advEventPlayerKilled(p, name)
 		}
 		s.killPlayerLocked(p, deathMessage(dmgType))
 		return
@@ -485,6 +492,25 @@ func (c *conn) handleClientCommand() error {
 func (s *Server) tickSurvival(p *player) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	// M17: per-tick advancement pass — the tick trigger (completes the
+	// root advancements, which makes each tab visible) and the dirty
+	// flush. Runs for every in-world player like vanilla doTick.
+	if p.adv != nil {
+		s.advDispatch(p, "minecraft:tick", advContext{player: p, biome: "minecraft:plains"})
+		s.advFlushDirty(p.adv, p.conn)
+		// levitation trigger: fire while the effect lifts the player.
+		if _, lev := p.effects[7]; lev {
+			if !p.advLevTracking {
+				p.advLevTracking = true
+				p.advLevStartY = p.y
+			}
+			s.advEventLevitation(p, p.advLevStartY, true)
+		} else {
+			p.advLevTracking = false
+		}
+	}
+
 	if p.dead || p.gameMode != 0 {
 		return
 	}
@@ -566,6 +592,11 @@ func isFireDamage(dmgType int32) bool {
 func (s *Server) moveFallDamageLocked(p *player, prevY, newY float64, onGround bool) {
 	noDmg, safeBonus := fallDamageOverride(&p.effectTarget)
 	if onGround {
+		// M17: fall_from_height 在落地时结算（起点在开始下坠时记录）。
+		if p.advFallTracking {
+			p.advFallTracking = false
+			s.advEventFall(p, p.advFallStartY, true)
+		}
 		// M13: jump_boost 提升 1 格/级的安全摔落高度。
 		safe := fallSafeDistance + float32(safeBonus)
 		if !noDmg && p.fallDistance > safe {
@@ -578,6 +609,11 @@ func (s *Server) moveFallDamageLocked(p *player, prevY, newY float64, onGround b
 		return
 	}
 	if newY < prevY {
+		if p.fallDistance == 0 && !p.advFallTracking {
+			// M17: record where the fall started.
+			p.advFallTracking = true
+			p.advFallStartY = prevY
+		}
 		p.fallDistance += float32(prevY - newY)
 	}
 }
@@ -667,6 +703,8 @@ func (c *conn) startEating(hand int32) {
 	if slot.count <= 0 {
 		return
 	}
+	// M17: consume_item 触发（食物效果与营养结算照旧）。
+	s.advEventConsume(p, slot.item)
 	fv, ok := foodByItem[slot.item]
 	if !ok {
 		// M13: 药水饮用：满饱食度也可饮用，同原版 alwaysEdible。
@@ -760,4 +798,50 @@ func (s *Server) giveOrDropItemLocked(p *player, itemID, count int32) {
 	}
 	e := newItemEntity(s.allocEntityID(), p.x, p.y+0.5, p.z, itemID, count)
 	s.spawnEntityLocked(e)
+}
+
+// giveExperiencePointsLocked ports ServerPlayer.giveExperiencePoints /
+// Player.getXpNeededForNextLevel: accumulate points, level up through
+// the vanilla per-level curve (0-15: 2L+7, 16-30: 5L-38, 31+: 9L-158).
+// Caller holds Server.mu.
+func (p *player) giveExperiencePointsLocked(amount int) {
+	p.expTotal += int32(amount)
+	for amount > 0 {
+		need := xpNeededForNextLevel(p.expLevel)
+		room := int(math.Round(float64(need) * (1 - float64(p.expProgress))))
+		if amount < room {
+			p.expProgress += float32(amount) / float32(need)
+			return
+		}
+		amount -= room
+		p.expLevel++
+		p.expProgress = 0
+	}
+	for amount < 0 {
+		need := xpNeededForNextLevel(p.expLevel - 1)
+		take := int(math.Round(float64(need) * float64(p.expProgress)))
+		if take == 0 && p.expProgress > 0 {
+			take = 1
+		}
+		if amount+take <= 0 {
+			p.expProgress -= float32(-amount) / float32(need)
+			p.expProgress = float32(math.Max(float64(p.expProgress), 0))
+			return
+		}
+		amount += take
+		p.expLevel--
+		p.expProgress = 1
+	}
+}
+
+// xpNeededForNextLevel is the vanilla experience level curve.
+func xpNeededForNextLevel(level int32) int32 {
+	switch {
+	case level >= 31:
+		return 9*level - 158
+	case level >= 16:
+		return 5*level - 38
+	default:
+		return 2*level + 7
+	}
 }

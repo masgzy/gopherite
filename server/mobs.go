@@ -388,6 +388,14 @@ func (s *Server) hurtMobTypeLocked(m *mobEntity, attacker *player, dmg float32, 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	// M17: player_hurt_entity（每次命中都触发；箭矢伤害带弹射物标记）。
+	projectile := dmgType == v776.DamageTypeArrow
+	direct := ""
+	if projectile {
+		direct = "minecraft:arrow"
+	}
+	s.advEventHurtEntity(attacker, "minecraft:"+m.def.name, projectile, direct)
+
 	m.health -= dmg
 
 	// Knockback away from the attacker.
@@ -436,6 +444,8 @@ func (s *Server) hurtMobTypeLocked(m *mobEntity, attacker *player, dmg float32, 
 	}
 
 	if m.health <= 0 {
+		// M17: player_killed_entity / killed_by_arrow（击杀归属已在参数里）。
+		s.advEventKill(attacker, "minecraft:"+m.def.name, projectile)
 		m.deathTicks = mobDeathAnimTicks
 		m.walking = false
 		m.vx, m.vy, m.vz = 0, 0, 0

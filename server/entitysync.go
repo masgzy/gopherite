@@ -24,6 +24,11 @@ const (
 // tickEntities advances every entity and then reconciles trackers. Runs
 // on the ticker goroutine only (guarded against shutdown by closing).
 func (s *Server) tickEntities() {
+	// M17: 手动驱动（测试）与 ticker 并发进入时，实体字段读写必须
+	// 全程互斥——快照、tick 与 sync 三段共享同一把内联锁。
+	s.entityTickMu.Lock()
+	defer s.entityTickMu.Unlock()
+
 	s.mu.Lock()
 	ids := make([]entity, 0, len(s.entities))
 	for _, e := range s.entities {

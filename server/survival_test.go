@@ -45,7 +45,12 @@ func expectNoise(b *botConn, want int32) *protocol.Reader {
 			v776.PacketPlayExplode,
 			// M12 background: weather game events (join snapshot and
 			// ticker-driven transitions).
-			v776.PacketPlayGameEvent:
+			v776.PacketPlayGameEvent,
+			// M17 background: advancement sync rides the tick cadence
+			// (root completions reveal tabs asynchronously).
+			v776.PacketPlayUpdateAdvancements,
+			v776.PacketPlaySelectAdvancementsTab,
+			v776.PacketPlaySystemChat:
 			continue
 		default:
 			b.t.Fatalf("want packet 0x%x, got 0x%x", want, id)

@@ -117,6 +117,10 @@ func recipesOfKind(kind string) []*recipeDef {
 
 // tagMembers returns the sorted item identifiers of a resolved tag.
 func tagMembers(tag string) []string {
+	// 归一化：调用方习惯带 vanilla 表达式的 '#' 前缀（如
+	// "#minecraft:logs"），生成表键则没有前缀。历史上 M10 燃料表
+	// 传了带前缀的名字，命中不了任何键（潜在 bug），在此统一剥掉。
+	tag = strings.TrimPrefix(tag, "#")
 	buildRecipeIndexes()
 	return tagItemName[tag]
 }

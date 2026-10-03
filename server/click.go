@@ -205,6 +205,11 @@ func (m *menu) doPickup(p *player, c *conn, slot, button int) {
 		m.set(p, slot, clicked)
 		m.carried = taken
 		m.afterSlotChange(p, slot)
+		// M17: brewed_potion（从酿造台药水槽取走药水的瞬间触发，
+		// vanilla PotionSlot.onTake 语义）。
+		if m.kind == menuBrewing && slot >= 1 && slot <= 3 && taken.potion > 0 {
+			c.s.advEventBrewed(p, potionNameOf(taken.potion))
+		}
 	case clicked.item == carried.item:
 		if primary {
 			// Merge carried into the slot.

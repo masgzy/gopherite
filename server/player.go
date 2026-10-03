@@ -93,6 +93,18 @@ type player struct {
 	// slots is the 36-slot inventory model (0-8 hotbar), guarded by
 	// Server.mu. Zero ids are empty stacks.
 	slots [36]invSlot
+
+	// adv is the M17 per-player advancement progress state; guarded by
+	// Server.mu like every other player field.
+	adv *playerAdvancements
+
+	// M17 fall/levitation trigger tracking (fall_from_height,
+	// levitation): the reference Y each trigger needs. Guarded by
+	// Server.mu.
+	advFallStartY   float64
+	advFallTracking bool
+	advLevStartY    float64
+	advLevTracking  bool
 }
 
 // invSlot is one inventory cell: a vanilla item registry id and stack

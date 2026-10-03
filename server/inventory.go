@@ -287,6 +287,8 @@ func (c *conn) placeBlock(u java.ServerboundUseItemOn) {
 	c.s.broadcastBlockUpdate(int32(x), int32(y), int32(z), int32(state))
 	c.s.mu.Lock()
 	c.s.redstoneUpdate(x, y, z)
+	// M17: placed_block 触发。
+	c.s.advEventPlace(p, block)
 	c.s.mu.Unlock()
 	log.Printf(ui.Success("OK ")+"%s 放置了 %s (%d, %d, %d)", p.name, block, x, y, z)
 }

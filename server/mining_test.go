@@ -154,7 +154,13 @@ configDone:
 			v776.PacketPlaySetEntityData,
 			// M9: hurt/death/explosion sounds reach the bot whenever the
 			// starter world has hostile activity.
-			v776.PacketPlaySound, v776.PacketPlayExplode:
+			v776.PacketPlaySound, v776.PacketPlayExplode,
+			// M17 background: advancement sync/announcement chatter
+			// (picking up the dropped starter crafting table completes
+			// story/root and broadcasts the toast/chat line).
+			v776.PacketPlayUpdateAdvancements,
+			v776.PacketPlaySelectAdvancementsTab,
+			v776.PacketPlaySystemChat:
 			continue
 		default:
 			t.Fatalf("unexpected packet 0x%x while joining", id)

@@ -220,6 +220,11 @@ const (
 	PacketPlaySBClientCommand     = 0x0C
 	PacketPlaySBInteract          = 0x1A
 	PacketPlaySBPlayerCommand     = 0x2A
+
+	// M17: 进度（packet_ids_776.txt 权威表）。
+	PacketPlayUpdateAdvancements    = 0x82
+	PacketPlaySelectAdvancementsTab = 0x55
+	PacketPlaySBSeenAdvancements    = 0x32
 )
 
 // Entity type registry ids (protocol_id from reports/registries.json).

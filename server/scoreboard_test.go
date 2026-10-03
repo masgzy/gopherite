@@ -304,8 +304,11 @@ func TestScoreboardDeathHook(t *testing.T) {
 	s.damagePlayerLocked(p, 1000, v776.DamageTypeFall, -1, -1)
 	sb := s.scoreboard
 	s.mu.Unlock()
-	if sb.scores["Victim"]["deaths"] != 1 || sb.scores["Victim"]["tk"] != 1 {
-		t.Fatalf("死亡钩子错误: %+v", sb.scores["Victim"])
+	s.mu.Lock() // M16 潜在竞态修复：读 scores 必须持锁（removePlayer 并发删键）
+	gotDeaths, gotTk := sb.scores["Victim"]["deaths"], sb.scores["Victim"]["tk"]
+	s.mu.Unlock()
+	if gotDeaths != 1 || gotTk != 1 {
+		t.Fatalf("死亡钩子错误: deaths=%d tk=%d", gotDeaths, gotTk)
 	}
 
 	// 玩家攻击致死 → playerKillCount+1（cause 指向另一名玩家）。
@@ -327,8 +330,11 @@ func TestScoreboardDeathHook(t *testing.T) {
 	s.damagePlayerLocked(victim2, 1000, v776.DamageTypePlayerAtk, killer.id, killer.id)
 	sb = s.scoreboard
 	s.mu.Unlock()
-	if sb.scores["Victim2"]["pk"] != 1 {
-		t.Fatalf("击杀归属错误: %+v", sb.scores["Victim2"])
+	s.mu.Lock()
+	gotPk := sb.scores["Victim2"]["pk"]
+	s.mu.Unlock()
+	if gotPk != 1 {
+		t.Fatalf("击杀归属错误: pk=%d", gotPk)
 	}
 }
 

@@ -233,6 +233,10 @@ func (e *itemEntity) tryPickup(s *Server) {
 				break
 			}
 		}
+		if placed {
+			// M17: inventory_changed（药水拾取同样计入背包变化）。
+			s.advEventItemChanged(taker, e.itemID)
+		}
 		s.mu.Unlock()
 		if !placed {
 			return // inventory full: leave the item
@@ -244,6 +248,11 @@ func (e *itemEntity) tryPickup(s *Server) {
 		return
 	}
 	remaining := taker.giveItemPotion(e.itemID, e.count, e.potion)
+	if remaining != e.count {
+		// M17: inventory_changed（拾取触发 story/husbandry 两页的
+		// "getting wood / stone" 等 28 个判据）。
+		s.advEventItemChanged(taker, e.itemID)
+	}
 	s.mu.Unlock()
 	if remaining == e.count {
 		return // inventory full: leave the item

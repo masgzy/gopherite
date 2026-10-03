@@ -152,6 +152,14 @@ type Server struct {
 	// M16 计分板与世界边界（guarded by mu；指令、tick、join 同步都走锁）。
 	scoreboard *Scoreboard
 	border     *worldBorder
+
+	// M17 进度树：全部玩家共享的只读定义（含布局坐标）。
+	advTree *advancementTree
+
+	// entityTickMu 串行化实体推进与同步（tickEntities 的注释声称只在
+	// ticker 协程上运行，但测试会手动驱动它；历史时序下两侧并发曾
+	// 暴露 item 字段的无锁窗口——M17 起显式互斥）。
+	entityTickMu sync.Mutex
 }
 
 // playerListLocked returns the joined players; caller holds mu.
@@ -199,6 +207,10 @@ func (s *Server) removePlayer(c *conn) {
 	if p != nil {
 		s.mu.Lock()
 		s.scoreboard.playerLeaving(p.name)
+		// M17: 登出即存进度（vanilla PlayerList.remove）。
+		if p.adv != nil {
+			s.advSave(p.adv, p.conn.profileID)
+		}
 		s.mu.Unlock()
 		s.broadcastRemovePlayer(p)
 	}
@@ -328,6 +340,13 @@ func New(opts Options) (*Server, error) {
 	// M16: scoreboard + world border (defaults until the save replay).
 	s.scoreboard = newScoreboard(s)
 	s.border = newWorldBorder()
+	// M17: embedded advancement tree (load failure aborts startup: a
+	// broken tree would render wrong on every client).
+	tree, err := loadAdvancementTree()
+	if err != nil {
+		return nil, err
+	}
+	s.advTree = tree
 	if opts.GCTuning {
 		s.gc = newGCTuner(gcConfig{
 			Enabled:     true,
@@ -451,6 +470,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	}()
 	select {
 	case <-done:
+		s.saveAllAdvancements()
 		if err := s.saveAllWorld(); err != nil {
 			log.Printf(ui.Error("X ")+"关停保存失败: %v", err)
 		}

@@ -532,3 +532,12 @@ func fallDamageOverride(t *effectTarget) (noDamage bool, safeBonus float64) {
 	}
 	return false, 0
 }
+
+// potionNameOf resolves a potion registry id (+1 offset used by invSlot)
+// to its identifier name; 0 yields "".
+func potionNameOf(potion int32) string {
+	if potion <= 0 || int(potion-1) >= len(potionDefs) {
+		return ""
+	}
+	return potionDefs[potion-1].name
+}

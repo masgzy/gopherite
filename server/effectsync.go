@@ -139,12 +139,19 @@ func (s *Server) applyPlayerEffectLocked(p *player, effID, amp, duration int32, 
 		return
 	}
 	s.syncPlayerEffectLocked(p, effID, inst)
+	s.advEventEffectsChanged(p) // M17: effects_changed
 	switch effID {
 	case 21: // absorption: (amp+1) * 2 吸收心，vanilla MAX_ABSORPTION +4/级
 		p.absorption = float32(2 * (amp + 1))
 	case 13, 23: // invisibility / glowing → 共享标志
 		s.syncPlayerSharedFlagsLocked(p)
 	}
+}
+
+// advEffectsChanged fires the M17 effects_changed trigger after any
+// player effect change. Caller holds Server.mu.
+func (s *Server) advEffectsChanged(p *player) {
+	s.advEventEffectsChanged(p)
 }
 
 // removePlayerEffectLocked drops one effect and syncs.
@@ -154,6 +161,7 @@ func (s *Server) removePlayerEffectLocked(p *player, effID int32) {
 	}
 	p.removeEffectSlot(effID)
 	s.syncPlayerRemoveEffectLocked(p.id, effID)
+	s.advEventEffectsChanged(p) // M17: effects_changed
 	if effID == 21 {
 		p.absorption = 0
 	}

@@ -162,46 +162,55 @@ func (m *menu) get(p *player, i int) invSlot {
 
 // set stores one wire slot; unknown cells are ignored.
 func (m *menu) set(p *player, i int, s invSlot) {
+	playerInv := false
 	if n := m.beSlotCount(); n > 0 {
 		switch {
 		case i >= 0 && i < n:
 			m.be.slots[i] = s
 		case i >= n && i < n+27:
 			p.slots[i-n+9] = s
+			playerInv = true
 		case i >= n+27 && i < m.slotCount():
 			p.slots[i-n-27] = s
+			playerInv = true
 		}
-		return
-	}
-	switch {
-	case i == 0:
+	} else if i == 0 {
 		m.result = s
-		return
-	case i < 0 || i >= m.slotCount():
-		return
-	}
-	if m.kind == menuInventory {
-		switch {
-		case i < 5:
-			m.grid[i-1] = s
-		case i < 9:
-			p.armor[i-5] = s
-		case i < 36:
-			p.slots[i] = s
-		case i < 45:
-			p.slots[i-36] = s
-		default:
-			p.offhand = s
+	} else if i >= 0 && i < m.slotCount() {
+		if m.kind == menuInventory {
+			switch {
+			case i < 5:
+				m.grid[i-1] = s
+			case i < 9:
+				p.armor[i-5] = s
+				playerInv = true
+			case i < 36:
+				p.slots[i] = s
+				playerInv = true
+			case i < 45:
+				p.slots[i-36] = s
+				playerInv = true
+			default:
+				p.offhand = s
+				playerInv = true
+			}
+		} else {
+			switch {
+			case i < 10:
+				m.grid[i-1] = s
+			case i < 37:
+				p.slots[i-1] = s
+				playerInv = true
+			default:
+				p.slots[i-37] = s
+				playerInv = true
+			}
 		}
-		return
 	}
-	switch {
-	case i < 10:
-		m.grid[i-1] = s
-	case i < 37:
-		p.slots[i-1] = s
-	default:
-		p.slots[i-37] = s
+	// M17: inventory_changed（玩家背包格变动即触发，覆盖合成取出、
+	// 容器搬移与手持交换）。
+	if playerInv && s.item > 0 && p.conn != nil && p.conn.s != nil {
+		p.conn.s.advEventItemChanged(p, s.item)
 	}
 }
 
@@ -340,6 +349,8 @@ func (c *conn) closeMenu(windowID int32, notify bool) {
 				c.s.spawnPlayerDropPotion(p, s.item, left, s.potion)
 			}
 			m.grid[i] = invSlot{}
+			// M17: 关菜单回流物品也计入背包变化。
+			c.s.advEventItemChanged(p, s.item)
 		}
 	}
 	if m.carried.count > 0 {
@@ -347,6 +358,7 @@ func (c *conn) closeMenu(windowID int32, notify bool) {
 			c.s.spawnPlayerDropPotion(p, m.carried.item, left, m.carried.potion)
 		}
 		m.carried = invSlot{}
+		c.s.advEventItemChanged(p, m.carried.item)
 	}
 	p.openMenu = nil
 	if notify {

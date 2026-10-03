@@ -96,6 +96,9 @@ func registerCommands(root *cmdNode) {
 
 	// M16: 计分板/队伍/世界边界。
 	registerM16Commands(root)
+
+	// M17: 进度。
+	registerM17Commands(root)
 }
 
 // setExec marks a node runnable.
