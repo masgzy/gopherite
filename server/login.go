@@ -84,7 +84,10 @@ func (c *conn) handleLoginHello() error {
 	}
 	c.challenge = challenge
 	c.wr.Reset()
-	c.wr.VarInt(v776.PacketLSHello)
+	// 客户端方向加密请求 = 0x01（PacketLoginHello）。PacketLSHello
+	// 是服务器方向 login start 的包号（0x00），在客户端方向 0x00
+	// 是 Login Disconnect——正版模式会直接把客户端当断线踢掉。
+	c.wr.VarInt(v776.PacketLoginHello)
 	java.WriteClientboundHello(c.wr, java.ClientboundHello{
 		ServerID:           "",
 		PublicKey:          c.s.keys.Public,

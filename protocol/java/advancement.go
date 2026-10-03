@@ -113,9 +113,12 @@ func writeDisplayInfo(w *protocol.Writer, a AdvancementDef) {
 	// ComponentSerialization.TRUSTED_STREAM_CODEC = network NBT compound.
 	WriteTranslateComponent(w, a.Title)
 	WriteTranslateComponent(w, a.Desc)
-	// ItemStackTemplate.STREAM_CODEC: item holder (registry id + 1),
-	// VarInt count, DataComponentPatch (empty = two zero VarInts).
-	w.VarInt(a.IconItem + 1)
+	// ItemStackTemplate.STREAM_CODEC（26.1+）：物品注册表**原始 id**、
+	// 数量、DataComponentPatch（空 = 两个零 VarInt）。26.1 起模板把
+	// id 提到 count 之前，且不再用 1.20.5 时代的 "holder id+1" 写法
+	// ——现行 wiki（Slot data）与 Pumpkin 的 26.1+ 分支双重验证；
+	// 多写 +1 会让每个图标错位到相邻物品。
+	w.VarInt(a.IconItem)
 	w.VarInt(a.IconCount)
 	w.VarInt(0) // component additions: none
 	w.VarInt(0) // component removals: none

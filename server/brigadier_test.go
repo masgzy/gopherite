@@ -265,6 +265,30 @@ func TestDeclareCommandsVanillaDecode(t *testing.T) {
 			t.Fatalf("node %d unknown type flags %d", i, flags&3)
 		}
 	}
+	// 客户端强转规则（26.2 ClientboundCommandsPacket.getRoot）：全树
+	// 必须恰有一个类型 0 节点，且 entries[rootIdx] 就是它。旧实现把
+	// 零值根 cmdNode 打成 argument（0x02），本测试因 byte 对齐而全绿，
+	// 真实客户端却在 getRoot 处 ClassCastException——此断言即回归防线。
+	rootSeen := -1
+	for i, n := range nodes {
+		typ := n.Flags & 3
+		if typ == 0 {
+			if rootSeen != -1 {
+				t.Fatalf("node %d is a second root node", i)
+			}
+			rootSeen = i
+			if n.Flags&^(java.NodeFlagRedirect|java.NodeFlagExecutable) != 0 {
+				t.Fatalf("root node %d carries unexpected flags 0x%x", i, n.Flags)
+			}
+		}
+	}
+	if rootSeen == -1 {
+		t.Fatal("no root node in the tree")
+	}
+	if int32(rootSeen) != rootIdx {
+		t.Fatalf("root node at index %d, but root index is %d", rootSeen, rootIdx)
+	}
+
 	root, err := r.VarInt()
 	if err != nil {
 		t.Fatalf("root index: %v", err)

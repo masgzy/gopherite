@@ -123,8 +123,8 @@ func TestMineDropsItem(t *testing.T) {
 				t.Fatalf("stack count %d, want 1", count)
 			}
 			item, _ := rr.VarInt()
-			if item != dirt+1 {
-				t.Fatalf("item id %d, want dirt holder %d", item, dirt+1)
+			if item != dirt {
+				t.Fatalf("item id %d, want dirt registry id %d (raw, 非 holder id+1)", item, dirt)
 			}
 			adds, _ := rr.VarInt()
 			removes, _ := rr.VarInt()
@@ -202,7 +202,7 @@ func TestItemPickupWalkover(t *testing.T) {
 			slot, _ := rr.VarInt()
 			count, _ := rr.VarInt()
 			item, _ := rr.VarInt()
-			if slot == 9 && count == 1 && item == cobble+1 {
+			if slot == 9 && count == 1 && item == cobble {
 				slotted = true
 			}
 		case v776.PacketPlayCBKeepAlive:

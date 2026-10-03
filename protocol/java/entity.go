@@ -124,8 +124,8 @@ func WriteUpdateAttributes(w *protocol.Writer, entityID int32, attrs []Attribute
 
 // WriteSetEntityDataItem encodes minecraft:set_entity_data carrying the
 // single ItemEntity payload: metadata index 8, ItemStack type, the stack,
-// then the 0xFF terminator. The item id uses the baked holder form
-// (registry index + 1), matching the inventory slot encoding. Potion
+// then the 0xFF terminator. The item id uses the 26.2 Slot 原始注册表 id
+// （与 inventory slot 编码一致，非 holder id+1）。Potion
 // forwards the M13 potion_contents component (0 = none).
 func WriteSetEntityDataItem(w *protocol.Writer, entityID int32, itemID, count, potion int32) {
 	w.VarInt(entityID)
@@ -135,7 +135,7 @@ func WriteSetEntityDataItem(w *protocol.Writer, entityID int32, itemID, count, p
 		w.VarInt(0) // empty stack
 	} else {
 		w.VarInt(count)
-		w.VarInt(itemID + 1)
+		w.VarInt(itemID)
 		writeComponentPatch(w, potion)
 	}
 	w.Byte(0xFF) // end of metadata list

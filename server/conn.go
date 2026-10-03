@@ -81,7 +81,6 @@ const defaultWriteTimeout = 10 * time.Second
 var errConnDead = errors.New("conn: write pipeline dead")
 
 func (s *Server) handleConn(nc net.Conn) {
-	defer nc.Close()
 	idle := time.Duration(s.opts.ReadTimeoutSeconds) * time.Second
 
 	c := &conn{
@@ -91,7 +90,17 @@ func (s *Server) handleConn(nc net.Conn) {
 		bw: bufio.NewWriterSize(nc, 4096),
 		st: stateHandshake,
 	}
+	c.fr = protocol.NewFrameReader(c.br, s.opts.MaxPacketLen)
+	c.rd = &protocol.Reader{}
+	c.wr = protocol.NewWriter()
 	defer func() {
+		// 先毒化写管线再关套接字：keepalive ticker 与其它玩家的广播
+		// 协程要么在 sendPacket 入口短路，要么拿到 net.ErrClosed 后由
+		// poison 静默收尾——不再出现 "use of closed network connection"
+		// 的误报日志（旧序只 Close 不置 dead，写入方会把关停竞争当
+		// 成真实写入故障上报）。
+		c.dead.Store(true)
+		_ = nc.Close()
 		if c.player != nil {
 			c.s.removePlayer(c)
 		}
@@ -99,9 +108,6 @@ func (s *Server) handleConn(nc net.Conn) {
 			log.Printf("%s 断开连接", c.username)
 		}
 	}()
-	c.fr = protocol.NewFrameReader(c.br, s.opts.MaxPacketLen)
-	c.rd = &protocol.Reader{}
-	c.wr = protocol.NewWriter()
 
 	for {
 		// Idle timeout: the deadline applies from now until the next frame
@@ -125,7 +131,11 @@ func (s *Server) handleConn(nc net.Conn) {
 		}
 		c.rd.Reset(payload)
 		if err := c.dispatch(); err != nil {
-			if !errors.Is(err, errKicked) {
+			// errKicked：已发 disconnect 包的正常踢出；
+			// errCloseAfterPong：status 阶段回完 pong 后的正常关闭
+			//（vanilla 行为，客户端刷新 MOTD 每次都会走到这里）。
+			// 两者都不算异常，静默退出即可。
+			if !errors.Is(err, errKicked) && !errors.Is(err, errCloseAfterPong) {
 				log.Printf("%s 会话异常: %v", c.username, err)
 			}
 			return
@@ -191,7 +201,12 @@ func (c *conn) poison(cause error) {
 	if !c.dead.CompareAndSwap(false, true) {
 		return
 	}
-	log.Printf("%s 写入失败，断开连接: %v", c.username, cause)
+	// net.ErrClosed 表示套接字早已被 Close（读循环退出的清理路径），
+	// 这次写入失败只是关停竞争的回声而非真实故障——vanilla 面对已
+	// 断开的连接同样只静默丢弃，不该刷 "写入失败" 恐慌日志。
+	if !errors.Is(cause, net.ErrClosed) {
+		log.Printf("%s 写入失败，断开连接: %v", c.username, cause)
+	}
 	_ = c.nc.Close()
 }
 

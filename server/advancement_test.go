@@ -12,6 +12,7 @@ import (
 	"net"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/masgzy/gopherite/protocol"
 	"github.com/masgzy/gopherite/protocol/java"
@@ -283,7 +284,10 @@ func TestAdvancementAwardRevokeAndFlush(t *testing.T) {
 	s.advFlushDirty(pa, c)
 	s.mu.Unlock()
 
-	if len(b.written()) == 0 {
+	// written() 读取与 io.Copy 协程落盘存在调度间隙（net.Pipe 同步写
+	// 返回后，拷贝协程还要持锁追加进缓冲），所以这里轮询而不是单次
+	// 判空——旧写法约 7% 的概率误报空包。
+	if !waitFor(t, 2*time.Second, func() bool { return len(b.written()) > 0 }) {
 		t.Fatal("root completion flush must send the tree packet")
 	}
 	if !pa.getOrStartProgress("minecraft:story/root").isDone() {
@@ -324,7 +328,9 @@ func TestAdvancementInventoryChangedTrigger(t *testing.T) {
 		t.Fatal("story/root must complete via crafting_table in inventory")
 	}
 	// The tree packet was flushed to the transport.
-	if len(b.written()) == 0 {
+	// 同 TestAdvancementAwardRevokeAndFlush：written() 有与 io.Copy
+	// 协程的调度间隙，必须轮询判定。
+	if !waitFor(t, 2*time.Second, func() bool { return len(b.written()) > 0 }) {
 		t.Fatal("flush must produce wire bytes")
 	}
 }

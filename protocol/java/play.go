@@ -624,8 +624,9 @@ func WriteSystemChat(w *protocol.Writer, text string) {
 }
 
 // WriteSetPlayerInventory encodes the 26.2 per-slot inventory sync: slot
-// VarInt then an optional ItemStack (count VarInt; when > 0: baked item
-// holder id+1, component patch).
+// VarInt then an optional ItemStack (count VarInt；当 > 0 时：物品注册表
+// **原始 id**、组件补丁两计数、条目——wiki 现行 Slot data 验证，
+// 多写 +1 会让每个物品错位一格).
 func WriteSetPlayerInventory(w *protocol.Writer, slot int32, itemID int32, count int32) {
 	WriteSetPlayerInventoryPotion(w, slot, itemID, count, 0)
 }
@@ -641,7 +642,7 @@ func WriteSetPlayerInventoryPotion(w *protocol.Writer, slot int32, itemID, count
 		return
 	}
 	w.VarInt(count)
-	w.VarInt(itemID + 1) // baked holder reference: registry index + 1
+	w.VarInt(itemID) // 26.2 Slot：物品注册表原始 id（非 holder id+1）
 	if potion > 0 {
 		writeComponentPatch(w, potion)
 	} else {
@@ -692,14 +693,17 @@ func writeOptionalStack(w *protocol.Writer, s ItemStack) {
 // ByteBufCodecs$23). Empty potion keeps the plain two zero VarInts.
 func writeComponentPatch(w *protocol.Writer, potion int32) {
 	if potion > 0 {
+		// DataComponentPatch：两个计数（新增/移除）相邻在前，条目在后——
+		// wiki 现行 Slot data 表序。旧的交织写法（新增计数、条目、移除
+		// 计数）会被客户端把 51 读成移除计数而错位崩包。
 		w.VarInt(1)  // added component count
+		w.VarInt(0)  // removed component count
 		w.VarInt(51) // minecraft:potion_contents
 		w.Bool(true)
 		w.VarInt(potion - 1)
 		w.Bool(false) // no custom color
 		w.VarInt(0)   // no custom effects
 		w.Bool(false) // no custom name
-		w.VarInt(0)   // removed component count
 		return
 	}
 	w.VarInt(0) // component additions: none

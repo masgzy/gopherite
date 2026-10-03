@@ -119,7 +119,15 @@ func flatten(root *cmdNode) ([]java.CommandNodeData, int32) {
 	nodes := make([]java.CommandNodeData, len(order))
 	for i, n := range order {
 		var flags byte
-		if n.literal {
+		if n == root {
+			// 根节点：Brigadier 线上类型 0x00（既非 literal 也非
+			// argument，不带名字和解析器）。其余任何非 literal 节点
+			// 都必须打成 argument——上面的零值 cmdNode 是根，若漏掉
+			// 这个特判，客户端会把 entries[root] 解析成
+			// ArgumentCommandNode，getRoot 的强转直接 ClassCastException
+			// （26.2 真实客户端崩溃已验证）。
+			flags = 0
+		} else if n.literal {
 			flags |= java.NodeFlagLiteral
 		} else {
 			flags |= java.NodeFlagArgument

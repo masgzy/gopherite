@@ -888,7 +888,8 @@ func TestEncryptedJoinFlow(t *testing.T) {
 	b.write(w.Bytes())
 
 	// Encryption request: empty server id, DER public key, 4-byte token.
-	r := b.expect(v776.PacketLSHello)
+	// 客户端方向加密请求 = PacketLoginHello(0x01)；0x00 是 Login Disconnect。
+	r := b.expect(v776.PacketLoginHello)
 	if serverID, err := r.String(64); err != nil || serverID != "" {
 		t.Fatalf("server id: %v %q", err, serverID)
 	}
@@ -1194,8 +1195,8 @@ func TestOnlineModeHasJoined(t *testing.T) {
 	w.VarInt(v776.PacketLSHello).String(player).UUID(protocol.OfflinePlayerUUID(player))
 	b.write(w.Bytes())
 
-	// Encryption request.
-	r := b.expect(v776.PacketLSHello)
+	// Encryption request（客户端方向 = PacketLoginHello 0x01）.
+	r := b.expect(v776.PacketLoginHello)
 	if _, err := r.String(64); err != nil {
 		t.Fatal(err)
 	}
