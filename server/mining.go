@@ -115,7 +115,7 @@ func (c *conn) handlePlayerAction() error {
 				}
 				held.count -= drop
 				p2.slots[p2.heldSlot] = held
-				c.s.spawnPlayerDrop(p2, held.item, drop)
+				c.s.spawnPlayerDropPotion(p2, held.item, drop, held.potion)
 				c.sendSlot(p2.heldSlot, held)
 			}
 		}

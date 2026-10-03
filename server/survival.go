@@ -333,7 +333,13 @@ func (s *Server) killPlayerLocked(p *player, message string) {
 				if take > itemMaxStack {
 					take = itemMaxStack
 				}
-				e := newItemEntity(s.allocEntityID(), p.x, p.y+0.5, p.z, p.slots[i].item, take)
+				var e *itemEntity
+				if p.slots[i].potion > 0 {
+					// M14：药水组件随掉落保留（药水/药水箭死亡不掉色）。
+					e = newItemEntityWithPotion(s.allocEntityID(), p.x, p.y+0.5, p.z, p.slots[i].item, take, p.slots[i].potion)
+				} else {
+					e = newItemEntity(s.allocEntityID(), p.x, p.y+0.5, p.z, p.slots[i].item, take)
+				}
 				s.spawnEntityLocked(e)
 				count -= take
 			}

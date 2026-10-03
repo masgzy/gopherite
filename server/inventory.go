@@ -53,17 +53,27 @@ func (c *conn) sendStarterInventory() {
 // Returns the leftover count that did NOT fit; the caller picks up only
 // what fits, vanilla-style. Caller holds Server.mu.
 func (p *player) giveItem(itemID, count int32) int32 {
+	return p.giveItemPotion(itemID, count, 0)
+}
+
+// giveItemPotion is the component-aware variant: stacks merge only when
+// both the item AND the potion_contents match (M14; tipped arrows and
+// potions never mix with plain stacks, mirroring vanilla component
+// equality). Caller holds Server.mu.
+func (p *player) giveItemPotion(itemID, count, potion int32) int32 {
 	// Merge pass.
 	for i := range p.slots {
-		if p.slots[i].item == itemID && p.slots[i].count > 0 && p.slots[i].count < itemMaxStack {
-			room := itemMaxStack - p.slots[i].count
+		s := p.slots[i]
+		if s.item == itemID && s.potion == potion && s.count > 0 && s.count < itemMaxStack {
+			room := itemMaxStack - s.count
 			take := count
 			if take > room {
 				take = room
 			}
-			p.slots[i].count += take
+			s.count += take
 			count -= take
-			p.conn.sendSlot(int32(i), p.slots[i])
+			p.slots[i] = s
+			p.conn.sendSlot(int32(i), s)
 			if count == 0 {
 				return 0
 			}
@@ -76,9 +86,10 @@ func (p *player) giveItem(itemID, count int32) int32 {
 			if take > itemMaxStack {
 				take = itemMaxStack
 			}
-			p.slots[i] = invSlot{item: itemID, count: take}
+			s := invSlot{item: itemID, count: take, potion: potion}
+			p.slots[i] = s
 			count -= take
-			p.conn.sendSlot(int32(i), p.slots[i])
+			p.conn.sendSlot(int32(i), s)
 			if count == 0 {
 				return 0
 			}
@@ -91,7 +102,7 @@ func (p *player) giveItem(itemID, count int32) int32 {
 func (c *conn) sendSlot(slot int32, s invSlot) {
 	body := protocol.NewWriter()
 	body.VarInt(v776.PacketPlaySetPlayerInv)
-	java.WriteSetPlayerInventory(body, slot, s.item, s.count)
+	java.WriteSetPlayerInventoryPotion(body, slot, s.item, s.count, s.potion)
 	_ = c.sendPacket(body.Bytes())
 }
 
@@ -283,6 +294,13 @@ func (c *conn) placeBlock(u java.ServerboundUseItemOn) {
 // spawnPlayerDrop drops item entities at the player (cursor drops,
 // container overflow, inventory throws). Caller holds Server.mu.
 func (s *Server) spawnPlayerDrop(p *player, itemID, count int32) {
+	s.spawnPlayerDropPotion(p, itemID, count, 0)
+}
+
+// spawnPlayerDropPotion is the M14 component-aware drop: potion > 0
+// spawns a stack carrying its potion_contents (tipped arrows and thrown
+// potions never lose their component mid-air). Caller holds Server.mu.
+func (s *Server) spawnPlayerDropPotion(p *player, itemID, count, potion int32) {
 	if itemID <= 0 || count <= 0 {
 		return
 	}
@@ -291,7 +309,12 @@ func (s *Server) spawnPlayerDrop(p *player, itemID, count int32) {
 		if take > itemMaxStack {
 			take = itemMaxStack
 		}
-		e := newItemEntity(s.allocEntityID(), p.x, p.y+0.5, p.z, itemID, take)
+		var e *itemEntity
+		if potion > 0 {
+			e = newItemEntityWithPotion(s.allocEntityID(), p.x, p.y+0.5, p.z, itemID, take, potion)
+		} else {
+			e = newItemEntity(s.allocEntityID(), p.x, p.y+0.5, p.z, itemID, take)
+		}
 		s.spawnEntity(e)
 		count -= take
 	}

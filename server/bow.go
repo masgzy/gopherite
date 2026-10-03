@@ -87,6 +87,8 @@ func (s *Server) fireBowLocked(p *player, chargeTicks int64) {
 		power = 1
 	}
 	arrowID := itemIDByName[arrowItemName]
+	// M14：记录消耗的那支箭的药水组件（药水箭发射后保留药效）。
+	firedPotion := int32(0)
 	if p.gameMode != 1 {
 		idx := -1
 		for i := range p.slots {
@@ -99,6 +101,7 @@ func (s *Server) fireBowLocked(p *player, chargeTicks int64) {
 			return // ran dry mid-draw: vanilla silently cancels
 		}
 		held := p.slots[idx]
+		firedPotion = held.potion // M14：药水箭的 potion_contents 随箭飞行
 		held.count--
 		if held.count == 0 {
 			held = invSlot{}
@@ -124,6 +127,8 @@ func (s *Server) fireBowLocked(p *player, chargeTicks int64) {
 		shooter:    p.id,
 		fromPlayer: true,
 		pickup:     p.gameMode != 1, // creative arrows are not collectible
+		potion:     firedPotion,
+		crit:       power == 1, // vanilla BowItem：满蓄力置 FLAG_CRIT
 		x:          ex, y: ey, z: ez,
 		vx: vx + rand.NormFloat64()*j,
 		vy: vy + rand.NormFloat64()*j,

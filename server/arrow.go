@@ -20,10 +20,11 @@ import (
 
 // Vanilla AbstractArrow constants.
 const (
-	arrowGravity    = 0.05
-	arrowInertia    = 0.99
-	arrowBaseDamage = 2.0
-	arrowLifespan   = 1200 // stuck arrows despawn after 60 s
+	arrowGravity     = 0.05
+	arrowInertia     = 0.99
+	arrowBaseDamage  = 2.0
+	arrowLifespan    = 1200 // stuck arrows despawn after 60 s
+	arrowPotionDecay = 600  // Arrow.EXPOSED_POTION_DECAY_TIME：药水箭插墙褪色
 )
 
 // arrowEntity is one flying or stuck arrow.
@@ -45,6 +46,13 @@ type arrowEntity struct {
 	stuck bool
 	age   int32
 
+	// M14 药水箭与暴击：potion 是药水注册 ID+1（0 = 普通箭）；crit 对应
+	// AbstractArrow 的 FLAG_CRIT（满蓄力射击）；groundTime 统计插墙
+	// tick，药水箭满 600t 褪色回普通箭（Arrow.tick 移植）。
+	potion     int32
+	crit       bool
+	groundTime int32
+
 	px, py, pz float64 // position at the start of this tick (segment hits)
 
 	nx, ny, nz   float64
@@ -54,6 +62,7 @@ type arrowEntity struct {
 	dead         bool
 	pendingHit   int32 // player entity id this arrow hit, consumed by the ticker
 	pendingMob   int32 // mob entity id this arrow hit (M11 player arrows)
+	aMeta        bool  // 元数据脏标记（crit/color 变化时置位）
 }
 
 func (e *arrowEntity) entityID() int32 { return e.id }
@@ -69,8 +78,16 @@ func (e *arrowEntity) alive() bool {
 	defer e.mu.Unlock()
 	return !e.dead
 }
-func (e *arrowEntity) metadataDirty() bool { return false }
-func (e *arrowEntity) clearMetadataDirty() {}
+func (e *arrowEntity) metadataDirty() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.aMeta
+}
+func (e *arrowEntity) clearMetadataDirty() {
+	e.mu.Lock()
+	e.aMeta = false
+	e.mu.Unlock()
+}
 func (e *arrowEntity) netPos() (float64, float64, float64, bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -117,6 +134,15 @@ func (e *arrowEntity) tick(s *Server) {
 		return
 	}
 	if e.stuck {
+		// M14：药水箭插墙 600t 后褪色（EXPOSED_POTION_DECAY_TIME）；
+		// vanilla 会广播实体事件 0（药水消散粒子），此处只保留数据态。
+		if e.potion != 0 {
+			e.groundTime++
+			if e.groundTime >= arrowPotionDecay {
+				e.potion = 0
+				e.aMeta = true
+			}
+		}
 		return
 	}
 
@@ -361,4 +387,37 @@ func encodeArrowSpawn(w *protocol.Writer, a *arrowEntity) {
 	java.WriteAddEntity(w, a.id, a.uuid, a.typeID(), a.x, a.y, a.z,
 		a.vx, a.vy, a.vz,
 		angleByte(a.pitch), angleByte(a.yaw), angleByte(a.yaw), 0)
+}
+
+// writeArrowMetadata encodes the set_entity_data frame for an arrow: the
+// crit flag (index 8) and the tipped-arrow potion color (index 11) —
+// entries are emitted only when non-default, mirroring vanilla's
+// getNonDefaultValues (M14).
+func writeArrowMetadata(w *protocol.Writer, a *arrowEntity) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	flags := byte(0)
+	if a.crit {
+		flags |= v776.ArrowFlagCrit
+	}
+	color := int32(-1) // Arrow.NO_EFFECT_COLOR
+	if a.potion > 0 {
+		color = potionColor(a.potion - 1)
+	}
+	if flags == 0 && color == -1 {
+		return // 无差异：不发空帧（空帧会中断客户端解码器）
+	}
+	w.VarInt(v776.PacketPlaySetEntityData)
+	w.VarInt(a.id)
+	if flags != 0 {
+		w.Byte(v776.MetaIndexArrowFlags)
+		w.VarInt(v776.MetaSerializerByte)
+		w.Byte(flags)
+	}
+	if color != -1 {
+		w.Byte(v776.MetaIndexArrowEffectColor)
+		w.VarInt(v776.MetaSerializerVarInt)
+		w.VarInt(color) // INT 序列化器即 VAR_INT；负数走 5 字节全形
+	}
+	w.Byte(0xFF)
 }

@@ -226,7 +226,7 @@ func TestSplashRadiusScaling(t *testing.T) {
         s.mu.Lock()
         s.players[pNear.conn] = pNear
         s.players[pFar.conn] = pFar
-        s.applySplashAt(0, 64, 0, 13 /*swiftness*/, false, 0)
+        s.applySplashAt(0, 64, 0, 13 /*swiftness*/, 0)
         s.mu.Unlock()
         if !pNear.hasEffect(0) {
                 t.Fatal("4 格内的玩家应获得效果")

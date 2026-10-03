@@ -179,8 +179,9 @@ const (
 	PacketPlayUpdateMobEffect = 0x84
 )
 
-// M13 entity type ids (EntityTypeIds.class registry order, 26.2).
+// M13/M14 entity type ids (EntityTypes.register declaration order, 26.2).
 const (
+	EntityTypeAreaEffectCloud = 3   // minecraft:area_effect_cloud（第 4 个 register 调用）
 	EntityTypeSplashPotion    = 105 // minecraft:splash_potion
 	EntityTypeLingeringPotion = 106 // minecraft:lingering_potion
 )
@@ -262,10 +263,12 @@ const (
 // Entity metadata serializer ordinals (net.minecraft.network.syncher
 // EntityDataSerializers registration order, stable since 1.13).
 const (
-	MetaSerializerByte   = 0
-	MetaSerializerVarInt = 1
-	MetaSerializerFloat  = 3
-	MetaSerializerBool   = 8
+	MetaSerializerByte         = 0
+	MetaSerializerVarInt       = 1
+	MetaSerializerFloat        = 3
+	MetaSerializerBool         = 8
+	MetaSerializerParticle     = 16 // 26.2 注册序：...BOOLEAN(8)...BLOCK_STATE(14)、OPTIONAL_BLOCK_STATE(15)、PARTICLE(16)
+	MetaSerializerParticleList = 17
 )
 
 // Entity metadata indices used by M9. Index 0 is Entity.DATA_FLAGS for
@@ -277,3 +280,26 @@ const (
 	MetaIndexCreeperSwell = 16
 	EntityFlagOnFire      = 0x01
 )
+
+// M14 元数据索引。AreaEffectCloud 直接继承 Entity（基类 0-7），自身
+// 依次定义 RADIUS(8)/WAITING(9)/PARTICLE(10)；AbstractArrow 在 Projectile
+// 之上定义 FLAGS(8)/PIERCE_LEVEL(9)/IN_GROUND(10)，Arrow 再加
+// EFFECT_COLOR(11)。对照 26.2 反编译源 defineId 声明序核验。
+const (
+	MetaIndexCloudRadius      = 8
+	MetaIndexCloudWaiting     = 9
+	MetaIndexCloudParticle    = 10
+	MetaIndexArrowFlags       = 8
+	MetaIndexArrowEffectColor = 11
+	ArrowFlagCrit             = 0x01 // AbstractArrow.FLAG_CRIT
+)
+
+// 粒子注册表序号（ParticleTypes.register 声明序，26.2 反编译核验）：
+// 0-27 依次为 angry_villager/block/.../end_rod，entity_effect = 28。
+// entity_effect 载荷为 ColorParticleOption：一个 int32 ARGB 颜色。
+const (
+	ParticleEntityEffect = 28
+)
+
+// PotionDefaultColor 是 PotionContents.getColor 的缺省值（无可见效果时）。
+const PotionDefaultColor = int32(-13083194)

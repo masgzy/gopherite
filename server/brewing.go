@@ -191,9 +191,10 @@ func (e *potionEntity) tick(s *Server) {
 	}
 }
 
-// consumePotionImpacts resolves impacted potions: applies the splash to
-// nearby entities and removes the projectile. Runs on the ticker with
-// Server.mu held by the caller (mirrors consumeArrowHits lock order).
+// consumePotionImpacts resolves impacted potions: splash potions apply
+// their effect cloud to nearby entities; lingering potions spawn the real
+// AreaEffectCloud entity. Runs on the ticker with Server.mu held by the
+// caller (mirrors consumeArrowHits lock order).
 func (s *Server) consumePotionImpacts() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -218,7 +219,14 @@ func (s *Server) consumePotionImpacts() {
 		}
 		pot.mu.Unlock()
 		if hit {
-			s.applySplashAt(px, py, pz, potionID, lingering, ownerID)
+			if lingering {
+				// M14：滞留药水落点生成真实的效果云实体
+				// （ThrownLingeringPotion.onHitAsPotion 移植）。
+				cloud := newCloudEntity(s.allocEntityID(), px, py, pz, potionID)
+				s.entities[cloud.id] = cloud
+			} else {
+				s.applySplashAt(px, py, pz, potionID, ownerID)
+			}
 		}
 	}
 }
@@ -227,13 +235,10 @@ func (s *Server) consumePotionImpacts() {
 // impact point (vanilla PotionUtils.applySplash radius 4.0 x 2.0 x 4.0,
 // duration scaled by 1 - dist/4 clamped to [0.25, 1]; direct hits are not
 // part of this simplified model — the thrower owns the closest box).
-func (s *Server) applySplashAt(x, y, z float64, potionID int32, lingering bool, ownerID int32) {
+// M14：滞留药水不再走此路径（改生成 AreaEffectCloud 实体）。
+func (s *Server) applySplashAt(x, y, z float64, potionID int32, ownerID int32) {
 	if potionID < 0 || int(potionID) >= len(potionDefs) {
 		return
-	}
-	scale := float32(1.0)
-	if lingering {
-		scale = 0.25 // 滞留药水时长 1/4（药水云实体暂缺）
 	}
 	for _, p := range s.players {
 		if p.dead || p.gameMode != 0 {
@@ -249,7 +254,7 @@ func (s *Server) applySplashAt(x, y, z float64, potionID int32, lingering bool, 
 		if f < 0.25 {
 			f = 0.25
 		}
-		s.applyPotionEffectsToPlayer(p, potionID, f*scale)
+		s.applyPotionEffectsToPlayer(p, potionID, f)
 	}
 	for _, e := range s.entities {
 		m, ok := e.(*mobEntity)
@@ -274,12 +279,26 @@ func (s *Server) applySplashAt(x, y, z float64, potionID int32, lingering bool, 
 			f = 0.25
 		}
 		m.mu.Lock()
-		s.applyPotionEffectsToMob(m, potionID, f*scale)
+		s.applyPotionEffectsToMob(m, potionID, f)
 		m.mu.Unlock()
 	}
 	_ = ownerID
+	// vanilla AbstractThrownPotion.onHit 末尾的 levelEvent(2002/2007)
+	// 由客户端播放同款音效；这里直接等效播放。
 	s.broadcastSoundLocked("minecraft:entity.potion.splash", v776.SoundSourcePlayers,
 		float32(x), float32(y), float32(z), 1.0, randomPitch())
+}
+
+// encodePotionSpawn writes the add_entity payload for a thrown potion:
+// the launch velocity lets the client free-simulate the parabola between
+// server move deltas (M14: previously potions spawned at the origin due
+// to the missing encoder branch).
+func encodePotionSpawn(w *protocol.Writer, e *potionEntity) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	java.WriteAddEntity(w, e.id, e.uuid, e.typeID(), e.x, e.y, e.z,
+		e.vx, e.vy, e.vz,
+		angleByte(e.pitch), angleByte(e.yaw), angleByte(e.yaw), 0)
 }
 
 // ---- brewing stand block entity -------------------------------------------

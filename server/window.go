@@ -336,15 +336,15 @@ func (c *conn) closeMenu(windowID int32, notify bool) {
 	}
 	for i, s := range m.grid {
 		if s.count > 0 {
-			if left := p.giveItem(s.item, s.count); left > 0 {
-				c.s.spawnPlayerDrop(p, s.item, left)
+			if left := p.giveItemPotion(s.item, s.count, s.potion); left > 0 {
+				c.s.spawnPlayerDropPotion(p, s.item, left, s.potion)
 			}
 			m.grid[i] = invSlot{}
 		}
 	}
 	if m.carried.count > 0 {
-		if left := p.giveItem(m.carried.item, m.carried.count); left > 0 {
-			c.s.spawnPlayerDrop(p, m.carried.item, left)
+		if left := p.giveItemPotion(m.carried.item, m.carried.count, m.carried.potion); left > 0 {
+			c.s.spawnPlayerDropPotion(p, m.carried.item, left, m.carried.potion)
 		}
 		m.carried = invSlot{}
 	}

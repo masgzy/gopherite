@@ -94,7 +94,7 @@ func (m *menu) doClick(p *player, c *conn, slot, button, input int) {
 				s.count -= take
 				m.set(p, slot, s)
 				m.afterSlotChange(p, slot)
-				c.s.spawnPlayerDrop(p, s.item, take)
+				c.s.spawnPlayerDropPotion(p, s.item, take, s.potion)
 			}
 		}
 	case inputPickupAll:
@@ -137,10 +137,10 @@ func (m *menu) doPickup(p *player, c *conn, slot, button int) {
 		// Click outside the window: drop carried (all / one).
 		if m.carried.count > 0 {
 			if primary {
-				c.s.spawnPlayerDrop(p, m.carried.item, m.carried.count)
+				c.s.spawnPlayerDropPotion(p, m.carried.item, m.carried.count, m.carried.potion)
 				m.carried = invSlot{}
 			} else {
-				c.s.spawnPlayerDrop(p, m.carried.item, 1)
+				c.s.spawnPlayerDropPotion(p, m.carried.item, 1, m.carried.potion)
 				m.carried.count--
 			}
 		}

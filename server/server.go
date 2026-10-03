@@ -254,8 +254,12 @@ func (s *Server) tickOnce() {
 	s.tickAllMobEffects()
 	s.mu.Unlock()
 
-	// M13: resolve thrown-potion impacts (applySplashAt) + despawns.
+	// M13: resolve thrown-potion impacts (applySplashAt / lingering cloud
+	// spawn) + despawns.
 	s.consumePotionImpacts()
+
+	// M14: area effect cloud lifecycle (effects every 5t, radius shrink).
+	s.consumeCloudTicks()
 
 	// M8: survival ticks (hunger, regen, void, eating) for every player.
 	// Snapshot under the lock: tickSurvival re-locks internally.

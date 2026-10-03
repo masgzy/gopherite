@@ -159,6 +159,76 @@ func effectTickInterval(id int32, amp int32) int32 {
 	return 0
 }
 
+// --- 效果颜色（MobEffects.java 26.2 构造参数，用于药水粒子色）--------------
+
+// effectColors 按效果注册序给出 26.2 MobEffect 的渲染颜色（ARGB）。
+// 来源：research/dec262/out5/MobEffects.java 逐条核验。
+var effectColors = [40]int32{
+	3402751,  // 0 speed
+	9154528,  // 1 slowness
+	14270531, // 2 haste
+	4866583,  // 3 mining_fatigue
+	16762624, // 4 strength
+	16262179, // 5 instant_health
+	11101546, // 6 instant_damage
+	16646020, // 7 jump_boost
+	5578058,  // 8 nausea
+	13458603, // 9 regeneration
+	9520880,  // 10 resistance
+	16750848, // 11 fire_resistance
+	10017472, // 12 water_breathing
+	16185078, // 13 invisibility
+	2039587,  // 14 blindness
+	12779366, // 15 night_vision
+	5797459,  // 16 hunger
+	4738376,  // 17 weakness
+	8889187,  // 18 poison
+	7561558,  // 19 wither
+	16284963, // 20 health_boost
+	2445989,  // 21 absorption
+	16262179, // 22 saturation
+	9740385,  // 23 glowing
+	13565951, // 24 levitation
+	5882118,  // 25 luck
+	12624973, // 26 unluck
+	15978425, // 27 slow_falling
+	1950417,  // 28 conduit_power
+	8954814,  // 29 dolphins_grace
+	745784,   // 30 bad_omen
+	4521796,  // 31 hero_of_the_village
+	2696993,  // 32 darkness
+	1484454,  // 33 trial_omen
+	14565464, // 34 raid_omen
+	12438015, // 35 wind_charged
+	7891290,  // 36 weaving
+	10092451, // 37 oozing
+	9214860,  // 38 infested
+	65518,    // 39 breath_of_the_nautilus
+}
+
+// potionColor 复刻 PotionContents.getColor（26.2）：把每个可见效果的
+// 颜色按 (amplifier+1) 加权平均；无效果时回退到 PotionDefaultColor
+// （vanilla 的缺省 -13083194）。返回值已按 ARGB 不透明处理。
+func potionColor(potionID int32) int32 {
+	if potionID < 0 || int(potionID) >= len(potionDefs) {
+		return v776.PotionDefaultColor
+	}
+	var r, g, b, weight int32
+	for _, pe := range potionDefs[potionID].effects {
+		c := effectColors[pe.eff]
+		w := pe.amp + 1
+		r += w * ((c >> 16) & 0xFF)
+		g += w * ((c >> 8) & 0xFF)
+		b += w * (c & 0xFF)
+		weight += w
+	}
+	if weight == 0 {
+		return v776.PotionDefaultColor
+	}
+	// 0xFF000000 超出 int32 正数域，直接用其补码表示（不透明 alpha）。
+	return -16777216 | (r/weight)<<16 | (g/weight)<<8 | b/weight
+}
+
 // --- 药水注册表（PotionIds.java / Potions.java 26.2 权威值）---------------
 
 // potionEffect is one effect granted by a potion.

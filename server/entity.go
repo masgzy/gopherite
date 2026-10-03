@@ -243,7 +243,7 @@ func (e *itemEntity) tryPickup(s *Server) {
 		taker.conn.sendTakeItem(e.id, taker.id, taken)
 		return
 	}
-	remaining := taker.giveItem(e.itemID, e.count)
+	remaining := taker.giveItemPotion(e.itemID, e.count, e.potion)
 	s.mu.Unlock()
 	if remaining == e.count {
 		return // inventory full: leave the item
@@ -457,6 +457,13 @@ func (s *Server) encodeSpawn(w *protocol.Writer, e entity) {
 	case *lightningEntity:
 		// 闪电无初始速度与 data，客户端自行播放闪烁。
 		java.WriteAddEntity(w, it.id, it.uuid, it.typeID(), it.x, it.y, it.z, 0, 0, 0, 0, 0, 0, 0)
+	case *potionEntity:
+		// M14 修复：此前落入 default 分支，客户端在原点看到药水实体。
+		// 投掷物带初始速度（LpVec3），data=0（物品经元数据同步）。
+		encodePotionSpawn(w, it)
+	case *cloudEntity:
+		// M14 区域效果云：静态实体，无速度无 data；渲染参数走元数据。
+		encodeCloudSpawn(w, it)
 	default:
 		// future types plug in here
 		java.WriteAddEntity(w, e.entityID(), [16]byte{}, e.typeID(), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
@@ -473,5 +480,20 @@ func (s *Server) encodeMetadata(w *protocol.Writer, e entity) {
 	}
 	if m, ok := e.(*mobEntity); ok {
 		writeMobMetadata(w, m)
+	}
+	if pot, ok := e.(*potionEntity); ok {
+		// M14：投掷药水的物品栈元数据（客户端据此渲染药水颜色）。
+		item := itemIDByName["minecraft:splash_potion"]
+		if pot.lingering {
+			item = itemIDByName["minecraft:lingering_potion"]
+		}
+		w.VarInt(v776.PacketPlaySetEntityData)
+		java.WriteSetEntityDataItem(w, pot.id, item, 1, pot.potionID+1)
+	}
+	if cloud, ok := e.(*cloudEntity); ok {
+		writeCloudMetadata(w, cloud)
+	}
+	if a, ok := e.(*arrowEntity); ok {
+		writeArrowMetadata(w, a)
 	}
 }
