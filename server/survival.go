@@ -570,14 +570,15 @@ func (p *player) moveExhaustion(dx, dz float64) {
 // --- eating ------------------------------------------------------------------
 
 // useItemStart routes a right-click use: a bow begins the M11 draw,
-// everything else takes the M8 eating path. Called from the connection
-// goroutine.
+// throwable items take the M15 throw path, everything else takes the M8
+// eating path. Called from the connection goroutine.
 func (c *conn) useItemStart(hand int32) {
 	s := c.s
 	s.mu.Lock()
 	heldBow := false
 	var throwPotion invSlot
 	var thrower *player
+	var tKind throwableKind
 	if p := c.player; p != nil && !p.dead {
 		held := p.slots[p.heldSlot]
 		switch {
@@ -586,9 +587,26 @@ func (c *conn) useItemStart(hand int32) {
 		case held.item == itemIDByName["minecraft:splash_potion"],
 			held.item == itemIDByName["minecraft:lingering_potion"]:
 			// M13: 喷溅/滞留药水右键即掷（不蓄力，vanilla ThrowableItemProjectile）。
-			if held.count > 0 && p.gameMode == 0 {
+			// M15 修正：创造模式同样可掷（消耗只在生存生效，vanilla
+			// ItemStack.consume 对 creative 是 no-op）。
+			if held.count > 0 {
 				throwPotion = held
 				thrower = p
+			}
+		case held.item == itemIDByName["minecraft:snowball"]:
+			if held.count > 0 {
+				thrower = p
+				tKind = throwSnowball
+			}
+		case held.item == itemIDByName["minecraft:egg"]:
+			if held.count > 0 {
+				thrower = p
+				tKind = throwEgg
+			}
+		case held.item == itemIDByName["minecraft:ender_pearl"]:
+			if held.count > 0 {
+				thrower = p
+				tKind = throwPearl
 			}
 		}
 	}
@@ -598,7 +616,11 @@ func (c *conn) useItemStart(hand int32) {
 		return
 	}
 	if thrower != nil {
-		c.throwPotion(throwPotion, hand)
+		if tKind == 0 {
+			c.throwPotion(throwPotion, hand)
+		} else {
+			c.throwThrowable(tKind)
+		}
 		return
 	}
 	c.startEating(hand)

@@ -56,14 +56,17 @@ func (c *conn) throwPotion(held invSlot, hand int32) {
 	if p == nil || p.dead || held.count <= 0 {
 		return
 	}
-	// Consume the thrown bottle.
-	slot := p.slots[p.heldSlot]
-	slot.count--
-	if slot.count <= 0 {
-		slot = invSlot{}
+	// Consume the thrown bottle. M15 修正：消耗只在生存生效（vanilla
+	// ItemStack.consume 对 creative 是 no-op），创造玩家同样可以掷药水。
+	if p.gameMode == 0 {
+		slot := p.slots[p.heldSlot]
+		slot.count--
+		if slot.count <= 0 {
+			slot = invSlot{}
+		}
+		p.slots[p.heldSlot] = slot
+		p.conn.sendSlot(p.heldSlot, slot)
 	}
-	p.slots[p.heldSlot] = slot
-	p.conn.sendSlot(p.heldSlot, slot)
 
 	lingering := held.item == itemIDByName["minecraft:lingering_potion"]
 	e := newThrownPotion(s, p, held.potion-1, lingering)

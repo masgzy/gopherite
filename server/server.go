@@ -258,6 +258,10 @@ func (s *Server) tickOnce() {
 	// spawn) + despawns.
 	s.consumePotionImpacts()
 
+	// M15: resolve snowball/egg/ender pearl impacts (hit feedback, chick
+	// hatch, owner teleport) + despawns.
+	s.consumeThrowableImpacts()
+
 	// M14: area effect cloud lifecycle (effects every 5t, radius shrink).
 	s.consumeCloudTicks()
 

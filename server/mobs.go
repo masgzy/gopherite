@@ -117,6 +117,11 @@ type mobEntity struct {
 
 	deathTicks int32 // >0 while the fall-over animation plays
 
+	// M15 幼年成长：egg 裂出的雏鸡带 age -24000（vanilla setAge），
+	// babyTicks 逐 tick 递减到 0 时转成年并刷新元数据。仅用于无繁殖
+	// 系统下的幼年态展示（繁育逻辑留给后续里程碑）。
+	babyTicks int32
+
 	blocked bool // horizontal collision flag for the hop logic
 
 	fallDistance   float32
@@ -235,6 +240,14 @@ func (m *mobEntity) tick(s *Server) {
 			m.removed = true
 		}
 		return
+	}
+
+	// M15：幼年逐 tick 成长，转成年时刷新元数据（baby 标志位清除）。
+	if m.babyTicks > 0 {
+		m.babyTicks--
+		if m.babyTicks == 0 {
+			m.metaDirty = true
+		}
 	}
 
 	h := m.def.height
@@ -589,6 +602,13 @@ func writeMobMetadata(w *protocol.Writer, m *mobEntity) {
 	w.Byte(v776.MetaIndexEntityFlags)
 	w.VarInt(v776.MetaSerializerByte)
 	w.Byte(flags)
+	if m.babyTicks > 0 {
+		// M15：LivingEntity.DATA_LIVING_ENTITY_FLAGS（索引 8）的
+		// 0x01 = 幼年（AgeableMob 的 isBaby 同步位）。
+		w.Byte(v776.MetaIndexLivingFlags)
+		w.VarInt(v776.MetaSerializerByte)
+		w.Byte(v776.EntityFlagBaby)
+	}
 	if m.def.hostile && m.def.name == "creeper" {
 		w.Byte(v776.MetaIndexCreeperSwell)
 		w.VarInt(v776.MetaSerializerVarInt)

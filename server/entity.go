@@ -464,6 +464,9 @@ func (s *Server) encodeSpawn(w *protocol.Writer, e entity) {
 	case *cloudEntity:
 		// M14 区域效果云：静态实体，无速度无 data；渲染参数走元数据。
 		encodeCloudSpawn(w, it)
+	case *throwableEntity:
+		// M15 投掷物（雪球/鸡蛋/末影珍珠）：带初始速度的 add_entity。
+		encodeThrowableSpawn(w, it)
 	default:
 		// future types plug in here
 		java.WriteAddEntity(w, e.entityID(), [16]byte{}, e.typeID(), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
@@ -495,5 +498,9 @@ func (s *Server) encodeMetadata(w *protocol.Writer, e entity) {
 	}
 	if a, ok := e.(*arrowEntity); ok {
 		writeArrowMetadata(w, a)
+	}
+	if t, ok := e.(*throwableEntity); ok {
+		// M15：投掷物的物品栈元数据（客户端据此渲染飞行物品）。
+		writeThrowableMetadata(w, t)
 	}
 }

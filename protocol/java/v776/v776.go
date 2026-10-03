@@ -124,6 +124,7 @@ const (
 	PacketPlayChunkBatchStart  = 0x0C
 	PacketPlayDisconnect       = 0x20
 	PacketPlayEntityEvent      = 0x22
+	PacketPlayLevelParticles   = 0x2F
 	PacketPlayPosSync          = 0x23
 	PacketPlayGameEvent        = 0x26
 	PacketPlayForgetChunk      = 0x25
@@ -186,6 +187,14 @@ const (
 	EntityTypeLingeringPotion = 106 // minecraft:lingering_potion
 )
 
+// M15 throwable projectile entity ids (EntityTypes.register declaration
+// order, 26.2: SNOWBALL/EGG/ENDER_PEARL 第 121/40/45 个 register 调用)。
+const (
+	EntityTypeEgg        = 39  // minecraft:egg
+	EntityTypeEnderPearl = 44  // minecraft:ender_pearl
+	EntityTypeSnowball   = 120 // minecraft:snowball
+)
+
 // M8 serverbound combat/input packets.
 const (
 	PacketPlaySBAttack        = 0x01
@@ -244,6 +253,9 @@ const (
 	DamageTypeIndirectMagic = 23 // minecraft:indirect_magic
 	DamageTypeMagic         = 27 // minecraft:magic
 	DamageTypeWither        = 49 // minecraft:wither
+	// M15 投掷物：thrown 覆盖雪球/鸡蛋的命中（珍珠用 ender_pearl）。
+	DamageTypeThrown     = 45 // minecraft:thrown
+	DamageTypeEnderPearl = 8  // minecraft:ender_pearl
 )
 
 // SoundSource enum ordinals (net.minecraft.sounds.SoundSource order).
@@ -281,6 +293,13 @@ const (
 	EntityFlagOnFire      = 0x01
 )
 
+// M15 元数据：LivingEntity 的首个同步位（defineId 声明序，Entity 0-7、
+// LivingEntity 8-14），0x01 = 幼年（AgeableMob.isBaby）。
+const (
+	MetaIndexLivingFlags = 8
+	EntityFlagBaby       = 0x01
+)
+
 // M14 元数据索引。AreaEffectCloud 直接继承 Entity（基类 0-7），自身
 // 依次定义 RADIUS(8)/WAITING(9)/PARTICLE(10)；AbstractArrow 在 Projectile
 // 之上定义 FLAGS(8)/PIERCE_LEVEL(9)/IN_GROUND(10)，Arrow 再加
@@ -299,6 +318,8 @@ const (
 // entity_effect 载荷为 ColorParticleOption：一个 int32 ARGB 颜色。
 const (
 	ParticleEntityEffect = 28
+	// M15：level_particles 直发的简单粒子（无载荷）。
+	ParticlePortal = 67 // minecraft:portal（珍珠落点）
 )
 
 // PotionDefaultColor 是 PotionContents.getColor 的缺省值（无可见效果时）。

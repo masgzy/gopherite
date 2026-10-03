@@ -148,3 +148,26 @@ func WriteTakeItemEntity(w *protocol.Writer, itemEntityID, collectorID, amount i
 	w.VarInt(collectorID)
 	w.VarInt(amount)
 }
+
+// WritePlayLevelParticles encodes minecraft:level_particles (26.2
+// ClientboundLevelParticlesPacket, packet id 0x2F per packet_ids_776).
+// Field order: overrideLimiter, alwaysShow, position (double x3),
+// spread (float x3), maxSpeed, count (int32, NOT a varint), then the
+// particle options (registry id + payload; simple particles carry none).
+// M15: pearls emit their 32 portal particles as count-1 emissions with
+// per-particle randomized position/offset, mirroring the 32 individual
+// ServerLevel.addParticle calls in ThrownEnderpearl.onHit.
+func WritePlayLevelParticles(w *protocol.Writer, particleID int32,
+	x, y, z, dx, dy, dz, maxSpeed float64, count int32) {
+	w.Bool(false) // overrideLimiter：portal 非 getOverrideLimiter 粒子
+	w.Bool(false) // alwaysShow：addParticle 默认 force=false
+	w.Double(x)
+	w.Double(y)
+	w.Double(z)
+	w.Float(float32(dx))
+	w.Float(float32(dy))
+	w.Float(float32(dz))
+	w.Float(float32(maxSpeed))
+	w.Int32(count)
+	w.VarInt(particleID)
+}
