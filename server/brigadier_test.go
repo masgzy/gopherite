@@ -241,6 +241,13 @@ func TestDeclareCommandsVanillaDecode(t *testing.T) {
 				if _, err := r.Byte(); err != nil {
 					t.Fatalf("node %d entity props: %v", i, err)
 				}
+			case id == java.ParserFloat, id == java.ParserDouble:
+				// flag byte 0 = unbounded（M16 worldborder 数值参数）。
+				if _, err := r.Byte(); err != nil {
+					t.Fatalf("node %d float props: %v", i, err)
+				}
+			case id == java.ParserVec2:
+				// singleton，无属性负载（M16 worldborder center）。
 			case id == java.ParserTime:
 				// 26.2: a raw int32 minimum, no flag byte.
 				if _, err := r.Int32(); err != nil {

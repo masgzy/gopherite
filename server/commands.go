@@ -93,6 +93,9 @@ func registerCommands(root *cmdNode) {
 	effectGive.add(effectGiveTarget)
 	effect.add(effectGive)
 	root.add(effect)
+
+	// M16: 计分板/队伍/世界边界。
+	registerM16Commands(root)
 }
 
 // setExec marks a node runnable.
@@ -147,7 +150,11 @@ func formatGC(s gcSnapshot) string {
 }
 
 func cmdHelp(c *conn, _ map[string]string) error {
-	return c.sendSystemChat("§6可用命令: §f/tps /tpsbar /gc /help /seed /list /say <消息> /give <玩家> <物品> [数量] /tp <x y z|玩家> /gamemode <模式> /time set <tick> /setblock <x y z> <方块>")
+	return c.sendSystemChat("§6可用命令: §f/tps /tpsbar /gc /help /seed /list /say <消息> /give <玩家> <物品> [数量] /tp <x y z|玩家> /gamemode <模式> /time set <tick> /setblock <x y z> <方块>\n" +
+		"§6效果与计分: §f/effect give|clear <玩家> [效果] [秒] [倍率]\n" +
+		"§6           /scoreboard objectives add|remove|list|display … /scoreboard players set|add|remove|get|reset|enable …\n" +
+		"§6           /team add|remove|join|leave|empty|list|option …\n" +
+		"§6           /worldborder set|add|center|damage amount|buffer|get|warning distance|time …")
 }
 
 func cmdSeed(c *conn, _ map[string]string) error {

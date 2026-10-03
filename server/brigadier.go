@@ -55,10 +55,22 @@ func argf(name, parser string, parserID int32, key string) *cmdNode {
 		n.fixedN = 3
 	case "brigadier:integer":
 		n.props = java.IntegerProps()
+	case "brigadier:double":
+		n.props = java.DoubleProps()
+	case "brigadier:float":
+		n.props = java.FloatProps()
 	case "minecraft:time":
 		n.props = java.TimeProps()
 	}
 	return n
+}
+
+// argWord builds a single-word brigadier:string argument (mode 0):
+// scoreboard/team names, criteria and similar identifiers live here —
+// the default argf string node is greedy and would swallow following
+// arguments.
+func argWord(name, key string) *cmdNode {
+	return &cmdNode{name: name, parser: "brigadier:string", parserID: java.ParserString, key: key, props: java.StringProps(0)}
 }
 
 func (n *cmdNode) add(child *cmdNode) *cmdNode {
@@ -233,6 +245,20 @@ func validateArg(n *cmdNode, val string) bool {
 	case "brigadier:integer":
 		_, err := strconv.ParseInt(val, 10, 32)
 		return err == nil
+	case "brigadier:double", "brigadier:float":
+		_, err := strconv.ParseFloat(val, 64)
+		return err == nil
+	case "minecraft:vec2":
+		parts := strings.Fields(val)
+		if len(parts) != 2 {
+			return false
+		}
+		for _, p := range parts {
+			if _, err := strconv.ParseFloat(p, 64); err != nil {
+				return false
+			}
+		}
+		return true
 	case "brigadier:bool":
 		return val == "true" || val == "false"
 	case "minecraft:vec3", "minecraft:block_pos":

@@ -178,6 +178,21 @@ const (
 	// M13: mob effects + thrown potions (clientbound).
 	PacketPlayRemoveMobEffect = 0x4E
 	PacketPlayUpdateMobEffect = 0x84
+
+	// M16: scoreboard（packet_ids_776.txt 权威表）。
+	PacketPlayResetScore          = 0x4F
+	PacketPlaySetDisplayObjective = 0x62
+	PacketPlaySetObjective        = 0x6A
+	PacketPlaySetPlayerTeam       = 0x6D
+	PacketPlaySetScore            = 0x6E
+
+	// M16: world border（packet_ids_776.txt 权威表）。
+	PacketPlayInitializeBorder      = 0x2B
+	PacketPlaySetBorderCenter       = 0x58
+	PacketPlaySetBorderLerpSize     = 0x59
+	PacketPlaySetBorderSize         = 0x5A
+	PacketPlaySetBorderWarningDelay = 0x5B
+	PacketPlaySetBorderWarningDist  = 0x5C
 )
 
 // M13/M14 entity type ids (EntityTypes.register declaration order, 26.2).
@@ -197,10 +212,14 @@ const (
 
 // M8 serverbound combat/input packets.
 const (
-	PacketPlaySBAttack        = 0x01
-	PacketPlaySBClientCommand = 0x0C
-	PacketPlaySBInteract      = 0x1A
-	PacketPlaySBPlayerCommand = 0x2A
+	PacketPlaySBAttack = 0x01
+	// M16: signed 指令与 Tab 补全（packet_ids_776.txt 权威表）。
+	PacketPlaySBChatCommandSigned = 0x08
+	PacketPlaySBCommandSuggestion = 0x0F
+	PacketPlayCBCommandSuggestion = 0x0F
+	PacketPlaySBClientCommand     = 0x0C
+	PacketPlaySBInteract          = 0x1A
+	PacketPlaySBPlayerCommand     = 0x2A
 )
 
 // Entity type registry ids (protocol_id from reports/registries.json).
@@ -256,6 +275,8 @@ const (
 	// M15 投掷物：thrown 覆盖雪球/鸡蛋的命中（珍珠用 ender_pearl）。
 	DamageTypeThrown     = 45 // minecraft:thrown
 	DamageTypeEnderPearl = 8  // minecraft:ender_pearl
+	// M16 世界边界：越界伤害（data/minecraft/damage_type 字母序第 34 个）。
+	DamageTypeOutsideBorder = 33 // minecraft:outside_border
 )
 
 // SoundSource enum ordinals (net.minecraft.sounds.SoundSource order).

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -147,6 +148,10 @@ type Server struct {
 	weather           int32 // weatherClear / weatherRain / weatherThunder
 	weatherTicks      int64
 	lastLoggedWeather int32
+
+	// M16 计分板与世界边界（guarded by mu；指令、tick、join 同步都走锁）。
+	scoreboard *Scoreboard
+	border     *worldBorder
 }
 
 // playerListLocked returns the joined players; caller holds mu.
@@ -192,6 +197,9 @@ func (s *Server) removePlayer(c *conn) {
 	delete(s.players, c)
 	s.mu.Unlock()
 	if p != nil {
+		s.mu.Lock()
+		s.scoreboard.playerLeaving(p.name)
+		s.mu.Unlock()
 		s.broadcastRemovePlayer(p)
 	}
 }
@@ -252,6 +260,7 @@ func (s *Server) tickOnce() {
 	s.mu.Lock()
 	s.tickBlockEntities()
 	s.tickAllMobEffects()
+	s.tickBorder()
 	s.mu.Unlock()
 
 	// M13: resolve thrown-potion impacts (applySplashAt / lingering cloud
@@ -316,6 +325,9 @@ func New(opts Options) (*Server, error) {
 	}
 	s := &Server{opts: opts, world: newWorld(0), players: make(map[*conn]*player), entities: make(map[int32]entity), blockEnts: make(map[[3]int]*blockEntity), stop: make(chan struct{}), started: make(chan struct{})}
 	s.nextEntityID.Store(0) // first allocEntityID() yields 1, matching tests
+	// M16: scoreboard + world border (defaults until the save replay).
+	s.scoreboard = newScoreboard(s)
+	s.border = newWorldBorder()
 	if opts.GCTuning {
 		s.gc = newGCTuner(gcConfig{
 			Enabled:     true,
@@ -335,6 +347,12 @@ func New(opts Options) (*Server, error) {
 		for k, b := range s.world.drainPendingBEs() {
 			s.blockEnts[k] = b
 		}
+		// M16: 计分板与世界边界存档回放（文件缺失时保留默认值）。
+		s.mu.Lock()
+		dataDir := filepath.Join(opts.LevelName, "data")
+		s.scoreboard.loadScoreboard(dataDir)
+		s.loadBorder(dataDir)
+		s.mu.Unlock()
 	}
 	if f, err := loadFaviconDataURI(opts.FaviconPath); err != nil {
 		// A broken icon must not keep the server offline: log it and go

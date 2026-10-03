@@ -5,11 +5,15 @@ import (
 	"strings"
 
 	"github.com/masgzy/gopherite/internal/ui"
+	"github.com/masgzy/gopherite/protocol"
+	"github.com/masgzy/gopherite/protocol/java"
+	"github.com/masgzy/gopherite/protocol/java/v776"
 )
 
 // handleCommand dispatches a serverbound chat command (the string arrives
-// without the leading slash). The command surface is intentionally tiny:
-// /tpsbar and /tps today, growing with later milestones.
+// without the leading slash) through the Brigadier tree. M16 fix: the
+// tree existed since M3 but this dispatcher only knew /tps and /tpsbar —
+// every other registered command answered "未知命令".
 func (c *conn) handleCommand(line string) error {
 	fields := strings.Fields(line)
 	if len(fields) == 0 {
@@ -17,14 +21,24 @@ func (c *conn) handleCommand(line string) error {
 	}
 	log.Printf(ui.Info("i ")+"%s 执行命令: /%s", c.username, line)
 
-	switch fields[0] {
-	case "tpsbar":
-		return c.toggleTpsbar()
-	case "tps":
-		return c.sendTpsChat()
-	default:
-		return c.sendSystemChat("§c未知命令: " + fields[0] + " §7(可用: /tpsbar, /tps)")
+	if pc := tryParse(getCommandRoot(), line); pc != nil && pc.run != nil {
+		return pc.run(c, pc.args)
 	}
+	return c.sendSystemChat("§c未知命令: " + fields[0] + " §7(输入 /help 查看可用命令)")
+}
+
+// handleCommandSuggestion answers a Tab-complete request with the
+// matches from suggestionsFor (start/length mark the replaced span).
+func (c *conn) handleCommandSuggestion() error {
+	id, text, err := java.ReadCommandSuggestion(c.rd)
+	if err != nil {
+		return err
+	}
+	start, length, matches := suggestionsFor(text)
+	body := protocol.NewWriter()
+	body.VarInt(v776.PacketPlayCBCommandSuggestion)
+	java.WriteCommandSuggestions(body, id, start, length, matches)
+	return c.sendPacket(body.Bytes())
 }
 
 // toggleTpsbar flips the player's personal performance boss bar.

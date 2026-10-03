@@ -88,6 +88,17 @@ func (c *conn) handlePlay() error {
 			return err
 		}
 		return c.handleCommand(cmd)
+	case v776.PacketPlaySBChatCommandSigned:
+		// M16: 在线客户端总是发 signed 变体；签名不校验（离线无聊天
+		// 会话），仅按 26.2 字段序消费后走同一分发。
+		cmd, err := java.ReadChatCommandSigned(c.rd)
+		if err != nil {
+			return err
+		}
+		return c.handleCommand(cmd)
+	case v776.PacketPlaySBCommandSuggestion:
+		// M16: Tab 补全请求 → suggestionsFor 组包回复。
+		return c.handleCommandSuggestion()
 	case v776.PacketPlaySBCarriedItem:
 		return c.handleSetCarriedItem()
 	case v776.PacketPlaySBContainerClick:
@@ -334,6 +345,13 @@ func (c *conn) startPlay() error {
 		return err
 	}
 
+	// M16: 计分板快照与世界边界全量包（vanilla placeNewPlayer →
+	// updateEntireScoreboard / sendLevelInfo 的 INITIALIZE_BORDER）。
+	c.s.mu.Lock()
+	c.s.scoreboard.sendFullScoreboard(c)
+	c.s.sendBorderInit(c)
+	c.s.mu.Unlock()
+
 	// LEVEL_CHUNKS_LOAD_START game event.
 	c.wr.Reset()
 	c.wr.VarInt(v776.PacketPlayGameEvent)
@@ -372,6 +390,9 @@ func (c *conn) handleMove(packetID int32) error {
 	c.s.mu.Lock()
 	prevX, prevY, prevZ := p.x, p.y, p.z
 	if move.HasPos {
+		// M16: 边界钳制——界内玩家不能走出边界（vanilla 通过碰撞形状
+		// 拦截，这里钳制目标坐标）；界外玩家仍可自由走回。
+		move.X, move.Z = c.s.clampMoveLocked(p, move.X, move.Z)
 		p.x, p.y, p.z = move.X, move.Y, move.Z
 		if ncx := chunkCoord(p.x); ncx != p.cx {
 			p.cx = ncx

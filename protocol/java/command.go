@@ -31,11 +31,13 @@ const (
 const (
 	ParserBool       = 0  // brigadier:bool
 	ParserFloat      = 1  // brigadier:float
+	ParserDouble     = 2  // brigadier:double
 	ParserInteger    = 3  // brigadier:integer
 	ParserString     = 5  // brigadier:string
 	ParserEntity     = 6  // minecraft:entity
 	ParserBlockPos   = 8  // minecraft:block_pos
 	ParserVec3       = 10 // minecraft:vec3
+	ParserVec2       = 11 // minecraft:vec2
 	ParserBlockState = 12 // minecraft:block_state
 	ParserItemStack  = 14 // minecraft:item_stack
 	ParserMessage    = 20 // minecraft:message
@@ -129,6 +131,11 @@ func EntityProps(single, playersOnly bool) []byte {
 
 // IntegerProps encodes brigadier:integer bounds (flags 0 = unbounded).
 func IntegerProps() []byte { return []byte{0} }
+
+// FloatProps/DoubleProps encode brigadier:float/double properties:
+// flags byte with the optional min/max bits unset (any value).
+func FloatProps() []byte  { return []byte{0} }
+func DoubleProps() []byte { return []byte{0} }
 
 // TimeProps encodes minecraft:time properties: a raw big-endian int32
 // minimum tick count (0 = any). The 26.2 TimeArgument.Info writes the

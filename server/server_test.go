@@ -630,6 +630,26 @@ configDone:
 				t.Fatalf("game event: %d", ev)
 			}
 			goto spawned
+		case v776.PacketPlayInitializeBorder:
+			// M16: 边界快照（8 字段），join 快照序列成员。
+			for k := 0; k < 4; k++ {
+				if _, err := rr.Double(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := rr.VarLong(); err != nil {
+				t.Fatal(err)
+			}
+			for k := 0; k < 3; k++ {
+				if _, err := rr.VarInt(); err != nil {
+					t.Fatal(err)
+				}
+			}
+		case v776.PacketPlaySetPlayerTeam, v776.PacketPlaySetObjective,
+			v776.PacketPlaySetDisplayObjective, v776.PacketPlaySetScore,
+			v776.PacketPlayResetScore:
+			// M16: 计分板快照（默认空计分板时无载荷包出现，出现则整体跳过）。
+			continue
 		case v776.PacketPlayDisconnect:
 			reason, _ := rr.String(1024)
 			t.Fatalf("play disconnect: %s", reason)
@@ -1041,7 +1061,11 @@ configDone:
 			v776.PacketPlayHeldSlot, v776.PacketPlayPlayerInfo,
 			v776.PacketPlayPlayerPosition, v776.PacketPlayCacheCenter,
 			v776.PacketPlayCacheRadius, v776.PacketPlaySpawnPosition,
-			v776.PacketPlaySetTime, v776.PacketPlayGameEvent:
+			v776.PacketPlaySetTime, v776.PacketPlayGameEvent,
+			// M16: scoreboard + border init ride the spawn sequence.
+			v776.PacketPlayInitializeBorder, v776.PacketPlaySetPlayerTeam,
+			v776.PacketPlaySetObjective, v776.PacketPlaySetDisplayObjective,
+			v776.PacketPlaySetScore, v776.PacketPlayResetScore:
 			// Spawn sequence packets; the offline flow test
 			// validates their full contents.
 		case v776.PacketPlayDisconnect:

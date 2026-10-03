@@ -306,6 +306,16 @@ func (s *Server) damagePlayerLocked(p *player, amount float32, dmgType int32, ca
 	p.eatTicksLeft = 0 // pain interrupts eating
 	p.usingBow = false // pain interrupts drawing a bow
 	if p.health <= 0 {
+		// M16: 死亡计分钩子（vanilla LivingEntity.die 的 scoreboard 段）：
+		// 死亡者 deathCount +1；凶手是玩家则 playerKillCount +1，否则
+		// totalKillCount +1。
+		sb := s.scoreboard
+		sb.bumpCriteriaLocked(p.name, "deathCount", 1)
+		if s.killerIsPlayerLocked(cause) {
+			sb.bumpCriteriaLocked(p.name, "playerKillCount", 1)
+		} else {
+			sb.bumpCriteriaLocked(p.name, "totalKillCount", 1)
+		}
 		s.killPlayerLocked(p, deathMessage(dmgType))
 		return
 	}
@@ -314,6 +324,20 @@ func (s *Server) damagePlayerLocked(p *player, amount float32, dmgType int32, ca
 	p.sendHealth()
 	s.broadcastSoundLocked("minecraft:entity.player.hurt", v776.SoundSourcePlayers,
 		float32(p.x), float32(p.y+0.9), float32(p.z), 1.0, randomPitch())
+}
+
+// killerIsPlayerLocked reports whether the damage cause id is a joined
+// player (M16 scoreboard kill attribution). Caller holds s.mu.
+func (s *Server) killerIsPlayerLocked(cause int32) bool {
+	if cause < 0 {
+		return false
+	}
+	for _, p := range s.players {
+		if p.id == cause {
+			return true
+		}
+	}
+	return false
 }
 
 // killPlayerLocked finishes off a player: death screen, inventory drop,
@@ -382,6 +406,8 @@ func deathMessage(dmgType int32) string {
 		name = "被炸死了"
 	case v776.DamageTypeOnFire, v776.DamageTypeInFire:
 		name = "被烧死了"
+	case v776.DamageTypeOutsideBorder:
+		name = "在边境之外殒命"
 	}
 	return fmt.Sprintf("玩家%s", name)
 }

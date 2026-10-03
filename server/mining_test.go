@@ -127,6 +127,14 @@ configDone:
 			v776.PacketPlayPlayerPosition, v776.PacketPlayCacheCenter,
 			v776.PacketPlayCacheRadius, v776.PacketPlaySpawnPosition,
 			v776.PacketPlaySetTime, v776.PacketPlayGameEvent,
+			// M16: scoreboard + world border init arrive inside the
+			// spawn sequence now.
+			v776.PacketPlayInitializeBorder, v776.PacketPlaySetPlayerTeam,
+			v776.PacketPlaySetObjective, v776.PacketPlaySetDisplayObjective,
+			v776.PacketPlaySetScore, v776.PacketPlayResetScore,
+			v776.PacketPlayTakeItemEntity, v776.PacketPlayBossEvent,
+			v776.PacketPlayRemoveEntities, v776.PacketPlayHurtAnimation,
+			v776.PacketPlayDamageEvent,
 			v776.PacketPlaySetPlayerInv, v776.PacketPlayContainerContent,
 			v776.PacketPlayCommands,
 			v776.PacketPlayContainerSetSlot, v776.PacketPlaySetCursorItem,
